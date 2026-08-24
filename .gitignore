@@ -1,0 +1,14 @@
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Dependencias y builds (no se usan, por si acaso)
+node_modules/
+dist/
+
+# Empaquetados
+*.zip
+
+# Editores
+.vscode/
+.idea/

@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Prototipo — montón rotatorio</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#06060c;
+              font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  #c { display:block; width:100%; height:100%; touch-action:none; }
+  #hud { position:fixed; top:10px; left:0; right:0; display:flex; justify-content:center;
+         gap:18px; align-items:center; pointer-events:none; color:#cfd2e6; font-size:15px;
+         letter-spacing:1px; }
+  #gauge { display:flex; gap:4px; }
+  .seg { width:26px; height:11px; border:1.5px solid #6f74a8; border-radius:2px; }
+  .seg.on { background:#f26b3a; border-color:#f26b3a; }
+  .btn { min-width:132px; padding:0 16px; height:52px; border:1.5px solid #4a4f7a;
+         border-radius:8px; background:rgba(30,34,60,.55); color:#cfd2e6; font-size:15px;
+         letter-spacing:2px; font-family:inherit; display:flex; align-items:center;
+         justify-content:center; user-select:none; cursor:pointer; }
+  #fs { position:fixed; top:8px; right:10px; width:38px; height:38px; display:flex;
+        align-items:center; justify-content:center; border:1.5px solid #3a3f68;
+        border-radius:7px; background:rgba(30,34,60,.5); color:#9aa0cc; font-size:17px;
+        cursor:pointer; user-select:none; z-index:5; }
+  #fs:active { background:rgba(70,80,140,.75); }
+  #hint { position:fixed; bottom:20px; left:0; right:0; text-align:center; font-size:11px;
+          letter-spacing:1px; color:#5c6090; pointer-events:none; }
+  .btn:active { background:rgba(70,80,140,.75); }
+  .btn.arm { border-color:#f26b3a; color:#f26b3a; }
+  #over { position:fixed; inset:0; display:none; flex-direction:column; gap:10px;
+          align-items:center; justify-content:center; background:rgba(4,4,10,.82);
+          color:#e8e8f4; font-size:20px; letter-spacing:2px; cursor:pointer; }
+  #over b { font-size:34px; color:#f26b3a; letter-spacing:4px; }
+  #over small { font-size:13px; color:#8a8fb8; letter-spacing:1px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span id="score">0</span><div id="gauge"></div></div>
+<div id="fs">⛶</div>
+<div id="hint">arrastra para girar · mantén para seguir · toca para hard drop · el bonus sale solo</div>
+<div id="over"><b>GAME OVER</b><span id="fin">0</span><small>toca para reiniciar</small></div>
+
+<script>
+"use strict";
+
+// ─── config ────────────────────────────────────────────────────────────────
+const N = 15, C = (N-1)/2;
+const R_FACTOR = 0.46;
+const ROT_STEP = 7.5 * Math.PI/180;
+const ROT_TWEEN = 16;
+const CHAIN_MIN = 3;
+const SPAWN_START = 1.8, SPAWN_MIN = 0.95, SPAWN_RAMP = 380;
+const BUBBLE_SPEED = 0.185;                 // velocidad inicial
+const FALL_ACCEL   = 0.065;                 // aceleración durante la caída
+const HARD_SPEED   = 0.95;                  // velocidad mínima tras hard drop
+const HARD_ACCEL   = 0.55;                  // y sigue acelerando más fuerte
+const SPIRAL_TANGENT = 2.1, SPIRAL_INWARD = 0.085;
+// las blancas son una entidad independiente: su propio reloj, su propia velocidad
+const WHITE_START = 22, WHITE_INT_START = 14, WHITE_INT_MIN = 7.0, WHITE_INT_RAMP = 340;
+const WHITE_SPEED = 0.115, WHITE_ACCEL = 0.035;
+const WHITE_SPREAD = 50 * Math.PI/180;   // dispersión alrededor del punto opuesto
+const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
+const TELEGRAPH = 1.25;                     // aviso previo a la salida de cada ficha
+const TELEGRAPH_ARC = 35 * Math.PI/180;     // amplitud del aviso
+
+// 4 colores base + morado, que entra más adelante en la partida
+const COL = ["#e0392b","#f2c53d","#2f6fd0","#3aa655","#a259e0"];
+const PURPLE_START = 160;                   // segundo en que aparece el morado
+const WHITE = 8, STONE = 9;                // fuera del rango de índices de color
+const PAINT = { 8:"#eef0f6", 9:"#484c5c" };
+function numColors(){ return t > PURPLE_START ? 5 : 4; }
+
+// ─── estado ────────────────────────────────────────────────────────────────
+const cv = document.getElementById("c"), cx = cv.getContext("2d");
+let W,H,PS,R,CELL,ox,oy;
+let grid, angle, angleT, flying, score, gauge, t, spawnT, dead, nextSpawn, whiteT, lastColorAngle;
+let purpleShown, banner;
+let dir, keyDir, rotT, dragAcc, ptrDown, ptrX, energy, lastMoveT, ptrT, moved;
+
+function idx(c,r){ return r*N+c; }
+function inb(c,r){ return c>=0&&c<N&&r>=0&&r<N; }
+function cheb(c,r){ return Math.max(Math.abs(c-C),Math.abs(r-C)); }
+function manh(c,r){ return Math.abs(c-C)+Math.abs(r-C); }
+
+function reset(){
+  grid = new Array(N*N).fill(null);
+  floaters = [];
+  flashT = 0; flashSet = new Set(); flashBonus = false;
+  grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
+  angle = angleT = 0; flying = []; score = 0; gauge = 0; t = 0;
+  spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; lastColorAngle = null;
+  purpleShown = false; banner = 0;
+  { const aArc = Math.random()*Math.PI*2;
+    nextSpawn = { aArc, a: aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82,
+                  k: Math.floor(Math.random()*4) }; }  // arranque: sin morado
+  dir = 0; keyDir = 0; rotT = 0; dragAcc = 0;
+  ptrDown = false; ptrX = 0; energy = 0; lastMoveT = 0; ptrT = 0; moved = false;
+  document.getElementById("over").style.display = "none";
+}
+
+function resize(){
+  W = cv.width = innerWidth; H = cv.height = innerHeight;
+  PS = Math.min(W,H); R = PS*R_FACTOR; CELL = R*2/N;
+  ox = W/2; oy = H/2;
+}
+addEventListener("resize", resize);
+
+// ─── conversiones ──────────────────────────────────────────────────────────
+function cellToWorldF(fc,fr){
+  const lx=(fc-C)*CELL, ly=(fr-C)*CELL, s=Math.sin(angle), co=Math.cos(angle);
+  return [ox + lx*co - ly*s, oy + lx*s + ly*co];
+}
+function cellToWorld(c,r){ return cellToWorldF(c,r); }
+function worldToCellF(x,y){
+  const dx=x-ox, dy=y-oy, s=Math.sin(-angle), co=Math.cos(-angle);
+  return [(dx*co - dy*s)/CELL + C, (dx*s + dy*co)/CELL + C];
+}
+const NB = [[0,-1],[0,1],[-1,0],[1,0]];   // adyacencia 4, sin diagonales
+
+// ─── spawn y vuelo ─────────────────────────────────────────────────────────
+// se decide con antelación para poder telegrafiarlo.
+// El arco marca la ZONA; el ángulo real cae en algún punto dentro de ella.
+// Las blancas NO pasan por aquí: tienen su propio ciclo y no se avisan.
+function pickNext(){
+  const k = Math.floor(Math.random()*numColors());
+  const aArc = Math.random()*Math.PI*2;
+  const a = aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82;   // dentro del arco
+  return { aArc, a, k };
+}
+function spawnNormal(n){
+  const a = n.a, d = PS*0.52;
+  lastColorAngle = a;
+  flying.push({ bonus:false, k:n.k, hard:false, trail:[],
+                x:ox+Math.cos(a)*d, y:oy+Math.sin(a)*d,
+                ux:-Math.cos(a), uy:-Math.sin(a), sp:PS*BUBBLE_SPEED,
+                acc:FALL_ACCEL });
+}
+// blanca: sin aviso, más lenta, inmune al hard drop.
+// Sale en el lado opuesto a la última ficha de color, para partir la atención.
+function spawnWhite(){
+  const base = (lastColorAngle===null ? Math.random()*Math.PI*2 : lastColorAngle) + Math.PI;
+  const a = base + (Math.random()-0.5)*WHITE_SPREAD;
+  const d = PS*0.52;
+  flying.push({ bonus:false, k:WHITE, hard:false, trail:[],
+                x:ox+Math.cos(a)*d, y:oy+Math.sin(a)*d,
+                ux:-Math.cos(a), uy:-Math.sin(a), sp:PS*WHITE_SPEED,
+                acc:WHITE_ACCEL });
+}
+function spawnBonus(lvl){
+  const a = Math.random()*Math.PI*2;
+  flying.push({ bonus:true, lvl, th:a, r:PS*0.50,
+                dir: Math.random()<0.5?1:-1, trail:[],
+                x:ox+Math.cos(a)*PS*0.50, y:oy+Math.sin(a)*PS*0.50 });
+}
+
+function stepFlying(dt){
+  for (let i=flying.length-1; i>=0; i--){
+    const b = flying[i];
+    if (b.bonus){                                     // espiral hacia dentro
+      b.th += SPIRAL_TANGENT*b.dir*dt*(PS*0.16/Math.max(b.r,PS*0.05));
+      b.r  -= PS*SPIRAL_INWARD*dt;
+      b.x = ox + Math.cos(b.th)*b.r; b.y = oy + Math.sin(b.th)*b.r;
+      b.trail.push([b.x,b.y]); if (b.trail.length>22) b.trail.shift();
+    } else {
+      b.sp += PS*(b.hard?HARD_ACCEL:b.acc)*dt;       // acelera al caer
+      b.x += b.ux*b.sp*dt; b.y += b.uy*b.sp*dt;
+      if (b.hard){
+        b.trail.push([b.x,b.y]); if (b.trail.length>10) b.trail.shift();
+      }
+    }
+    const hit = checkHit(b);
+    if (hit){ flying.splice(i,1); land(b, hit); }
+    else if (Math.hypot(b.x-ox,b.y-oy) > PS*0.75) flying.splice(i,1);
+  }
+}
+
+// devuelve la celda ocupada impactada, o null
+function checkHit(b){
+  const [fc,fr] = worldToCellF(b.x,b.y);
+  const c0 = Math.round(fc), r0 = Math.round(fr);
+  let best=null, bd=0.92;
+  for (let dc=-1; dc<=1; dc++) for (let dr=-1; dr<=1; dr++){
+    const c=c0+dc, r=r0+dr;
+    if (!inb(c,r) || !grid[idx(c,r)]) continue;
+    const d = Math.hypot(fc-c, fr-r);
+    if (d < bd){ bd=d; best=[c,r]; }
+  }
+  return best;
+}
+
+// snap to grid: celda libre vecina de la impactada más próxima a la posición real
+function land(b, hit){
+  // el bonus no ocupa celda: actúa sobre la celda del montón contra la que choca
+  if (b.bonus){ applyBonus(hit); return; }
+
+  const [fc,fr] = worldToCellF(b.x,b.y);
+  const [hc,hr] = hit;
+  let cell=null, bd=Infinity;
+  for (const [dc,dr] of NB){
+    const c=hc+dc, r=hr+dr;
+    if (!inb(c,r) || grid[idx(c,r)]) continue;
+    const d = Math.hypot(fc-c, fr-r);
+    if (d<bd){ bd=d; cell=[c,r]; }
+  }
+  if (!cell) cell = ringSearch(hc,hr);
+  if (!cell) return;
+
+  grid[idx(cell[0],cell[1])] = { k:b.k, age:0, vc:fc, vr:fr };
+  resolve();
+}
+function ringSearch(c0,r0){
+  for (let rad=2; rad<N; rad++)
+    for (let dc=-rad; dc<=rad; dc++) for (let dr=-rad; dr<=rad; dr++){
+      if (Math.max(Math.abs(dc),Math.abs(dr))!==rad) continue;
+      const c=c0+dc, r=r0+dr;
+      if (inb(c,r) && !grid[idx(c,r)]) return [c,r];
+    }
+  return null;
+}
+
+// ─── cadenas, colateral, gravedad ──────────────────────────────────────────
+function findPops(){
+  const seen = new Uint8Array(N*N), out = new Set();
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    const g = grid[idx(c,r)];
+    if (!g || seen[idx(c,r)] || g.k<0 || g.k===WHITE || g.k===STONE) continue;
+    const st=[[c,r]], grp=[]; seen[idx(c,r)]=1;
+    while (st.length){
+      const [a,b] = st.pop(); grp.push([a,b]);
+      for (const [dc,dr] of NB){
+        const p=a+dc, q=b+dr;
+        if (!inb(p,q) || seen[idx(p,q)]) continue;
+        const h = grid[idx(p,q)];
+        if (h && h.k===g.k){ seen[idx(p,q)]=1; st.push([p,q]); }
+      }
+    }
+    if (grp.length >= CHAIN_MIN) grp.forEach(([a,b])=>out.add(idx(a,b)));
+  }
+  if (!out.size) return out;
+
+  // colateral: blancas adyacentes, propagando entre blancas
+  const q = [...out], wseen = new Set();
+  while (q.length){
+    const i = q.pop(), c = i%N, r = (i/N)|0;
+    for (const [dc,dr] of NB){
+      const p=c+dc, s=r+dr;
+      if (!inb(p,s)) continue;
+      const h = grid[idx(p,s)];
+      if (h && h.k===WHITE && !wseen.has(idx(p,s))){
+        wseen.add(idx(p,s)); out.add(idx(p,s)); q.push(idx(p,s));
+      }
+    }
+  }
+  return out;
+}
+
+// gravedad: UNA resolución por estallido, pero completa —
+// cada ficha desliza hasta quedar bloqueada, sin dejar fichas flotando a medias.
+// No es recursiva: no vuelve a lanzarse sola, la llama quien provoca el estallido.
+function gravityPass(){
+  let moved = false;
+  for (let sweep=0; sweep<N*2; sweep++){
+    const cells = [];
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+      const g = grid[idx(c,r)];
+      if (g && g.k>=0) cells.push([c,r,manh(c,r)]);
+    }
+    cells.sort((a,b)=>a[2]-b[2]);                     // de dentro hacia fuera
+    let any = false;
+    for (const [c0,r0] of cells){
+      let c=c0, r=r0;
+      if (!grid[idx(c,r)]) continue;
+      for (let step=0; step<N*2; step++){             // agota el recorrido
+        const dx = C-c, dy = C-r;
+        if (!dx && !dy) break;
+        const major = Math.abs(dx) >= Math.abs(dy) ? 0 : 1;   // empate → X
+        const opts = major===0
+          ? [[c+Math.sign(dx), r], [c, r+Math.sign(dy)]]
+          : [[c, r+Math.sign(dy)], [c+Math.sign(dx), r]];
+        let did = false;
+        for (const [p,s] of opts){
+          if ((p===c && s===r) || !inb(p,s) || grid[idx(p,s)]) continue;
+          grid[idx(p,s)] = grid[idx(c,r)]; grid[idx(c,r)] = null;
+          c=p; r=s; did = any = moved = true; break;
+        }
+        if (!did) break;
+      }
+    }
+    if (!any) break;                                  // ya está estable
+  }
+  return moved;
+}
+
+// separa el conjunto estallado en grupos conexos, para un texto por match
+function splitComponents(set){
+  const rest = new Set(set), out = [];
+  while (rest.size){
+    const start = rest.values().next().value;
+    const st=[start], comp=[]; rest.delete(start);
+    while (st.length){
+      const i = st.pop(); comp.push(i);
+      const c=i%N, r=(i/N)|0;
+      for (const [dc,dr] of NB){
+        const p=c+dc, s=r+dr;
+        if (!inb(p,s)) continue;
+        const j = idx(p,s);
+        if (rest.has(j)){ rest.delete(j); st.push(j); }
+      }
+    }
+    out.push(comp);
+  }
+  return out;
+}
+
+// SINGLE_PASS: una sola pasada de gravedad por estallido.
+// El match tiene prioridad: se comprueba antes de la gravedad y otra vez después de ella.
+// ─── resolución en dos fases ───────────────────────────────────────────────
+// 1. se detecta el match y las fichas destellan a blanco (sin desaparecer aún)
+// 2. al acabar el destello se vacían, cae el montón y se busca el siguiente match
+const FLASH_TIME = 0.19;
+let flashT = 0, flashSet = new Set(), flashBonus = false, comboDepth = 0;
+
+function tryMatch(){
+  const pops = findPops();
+  if (!pops.size){ checkDead(); return false; }
+  flashSet = pops;
+  flashBonus = false;
+  flashT = FLASH_TIME;
+  return true;
+}
+
+// llamada tras un aterrizaje: arranca una resolución nueva, combo a cero
+function resolve(){ if (flashT > 0) return; comboDepth = 0; tryMatch(); }
+
+// Carga del medidor por grupo. Muy superlineal: a base de tríos cuesta muchísimo,
+// con cuartetos y quintetos el bonus llega en un momento.
+function gaugeForSize(n){
+  if (n <= 3) return 0.17;      // ~24 tríos para llenar el medidor
+  if (n === 4) return 0.55;     // ~8
+  if (n === 5) return 1.15;     // ~4
+  if (n === 6) return 1.80;
+  return 1.80 + 0.55*(n-6);
+}
+// Multiplicador de puntuación por tamaño del grupo
+function scoreMultForSize(n){
+  if (n <= 3) return 1;
+  if (n === 4) return 1.6;
+  if (n === 5) return 2.4;
+  return 3.2 + 0.8*(n-6);
+}
+// Multiplicador de combo: 1ª, 2ª, 3ª... cadena de la misma resolución
+const COMBO_MULT = [1, 1.9, 3.2, 4.8, 6.5, 8.5];
+function comboMult(){ return COMBO_MULT[Math.min(comboDepth, COMBO_MULT.length-1)]; }
+
+function commitFlash(){
+  const cm = comboMult();
+
+  if (flashBonus){
+    const pts = flashSet.size*5;
+    addFloater([...flashSet], pts, "#f26b3a");
+    flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
+    score += pts;
+  } else {
+    // puntuación y carga se calculan POR GRUPO, no sobre el total
+    for (const comp of splitComponents(flashSet)){
+      let tone = "#ffffff";
+      for (const i of comp){
+        const g = grid[i];
+        if (g && g.k>=0 && g.k!==WHITE && g.k!==STONE){ tone = COL[g.k]; break; }
+      }
+      const n = comp.length;
+      const pts = Math.round(n * 5 * scoreMultForSize(n) * cm);
+      addFloater(comp, pts, tone, comboDepth>0 ? "x"+cm.toFixed(1).replace(/\.0$/,"")+" COMBO" : null);
+      score += pts;
+      gauge = Math.min(4, gauge + gaugeForSize(n)*cm);
+    }
+    flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
+  }
+
+  const wasBonus = flashBonus;
+  flashSet = new Set(); flashBonus = false; flashT = 0;
+  gravityPass();
+
+  // encadena: si la caída formó match, sube el combo y vuelve a destellar
+  const more = tryMatch();
+  if (more && !wasBonus) comboDepth++; else if (!more) comboDepth = 0;
+}
+
+function stepFlash(dt){
+  if (flashT <= 0) return;
+  flashT -= dt;
+  if (flashT <= 0) commitFlash();
+}
+
+// ─── bonus ─────────────────────────────────────────────────────────────────
+// Un único bonus: revienta el marco de la celda impactada y todos los exteriores.
+// El nivel es el de la celda del MONTÓN contra la que choca, no el de una celda libre.
+function applyBonus(cell){
+  const lv = Math.max(1, cheb(cell[0], cell[1]));   // nunca arrasa desde el núcleo
+  const kill = new Set();
+  for (let q=0;q<N;q++) for (let s=0;s<N;s++){
+    if (cheb(q,s) < lv) continue;
+    const g = grid[idx(q,s)];
+    if (g && g.k>=0) kill.add(idx(q,s));
+  }
+  if (kill.size){
+    flashSet = kill;
+    flashBonus = true;
+    flashT = FLASH_TIME;
+  }
+}
+
+// ─── textos flotantes de puntuación ────────────────────────────────────────
+let floaters = [];
+const FLOAT_LIFE = 1.15;
+
+// centroide de un conjunto de celdas, en posición visual
+function popCentroid(cells){
+  let sc=0, sr=0;
+  for (const i of cells){ sc += i%N; sr += (i/N)|0; }
+  return [sc/cells.length, sr/cells.length];
+}
+function addFloater(cells, pts, tone, label){
+  const [fc,fr] = popCentroid(cells);
+  floaters.push({ fc, fr, pts, tone, label:label||null, life:0, rise:0 });
+}
+function stepFloaters(dt){
+  for (let i=floaters.length-1;i>=0;i--){
+    const f = floaters[i];
+    f.life += dt; f.rise += dt*CELL*1.05;
+    if (f.life > FLOAT_LIFE) floaters.splice(i,1);
+  }
+}
+function drawFloaters(){
+  for (const f of floaters){
+    const p = f.life/FLOAT_LIFE;
+    const [x,y] = cellToWorldF(f.fc, f.fr);
+    const scale = p<0.16 ? 0.55 + 0.45*(p/0.16)*1.35 : 1.12 - 0.12*p;
+    cx.save();
+    cx.globalAlpha = p<0.72 ? 1 : 1-(p-0.72)/0.28;
+    cx.translate(x, y - f.rise);
+    cx.scale(scale, scale);
+    cx.font = `700 ${Math.round(CELL*0.95)}px ui-monospace, Menlo, Consolas, monospace`;
+    cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.lineWidth = Math.max(3, CELL*0.16);
+    cx.strokeStyle = "rgba(4,4,12,.92)";
+    cx.strokeText("+"+f.pts, 0, 0);
+    cx.fillStyle = f.tone;
+    cx.fillText("+"+f.pts, 0, 0);
+    if (f.label){
+      cx.font = `700 ${Math.round(CELL*0.52)}px ui-monospace, Menlo, Consolas, monospace`;
+      cx.lineWidth = Math.max(2, CELL*0.10);
+      cx.strokeText(f.label, 0, CELL*0.82);
+      cx.fillStyle = "#f2c53d";
+      cx.fillText(f.label, 0, CELL*0.82);
+    }
+    cx.restore();
+  }
+}
+
+// ─── animación de posiciones dentro del grid ───────────────────────────────
+const FALL_EASE = 15;
+function easeVisual(dt){
+  const k = Math.min(1, FALL_EASE*dt);
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    const b = grid[idx(c,r)]; if (!b) continue;
+    if (b.vc === undefined){ b.vc = c; b.vr = r; }
+    b.vc += (c - b.vc)*k;
+    b.vr += (r - b.vr)*k;
+  }
+}
+
+// ─── petrificación y derrota ───────────────────────────────────────────────
+function ageBubbles(dt){
+  for (let i=0;i<N*N;i++){
+    const g = grid[i];
+    // la piedra central, las piedras y las blancas no envejecen
+    if (!g || g.k<0 || g.k===STONE || g.k===WHITE) continue;
+    g.age += dt;
+    if (g.age > STONE_TIME) g.k = STONE;
+  }
+}
+function checkDead(){
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    if (!grid[idx(c,r)]) continue;
+    const [x,y] = cellToWorld(c,r);
+    if (Math.hypot(x-ox,y-oy) > R){ dead = true; return; }
+  }
+}
+
+// ─── input ─────────────────────────────────────────────────────────────────
+// La velocidad angular sale de la "energía" del gesto: un arrastre corto y lento
+// gira despacio; uno amplio y rápido gira deprisa.
+const DRAG_PX_SLOW = 18;   // px por paso con gesto suave
+const DRAG_PX_FAST = 7;    // px por paso con gesto enérgico
+const HOLD_SLOW = 0.125;   // periodo del giro mantenido, gesto suave
+const HOLD_FAST = 0.028;   // periodo del giro mantenido, gesto enérgico
+const SPEED_REF = 1400;    // px/s considerados gesto enérgico
+const SPEED_EMA = 0.30;    // suavizado de la medida de velocidad
+const HOLD_KEY = 0.055;    // periodo fijo para teclado
+
+function rotate(d){ angleT += d*ROT_STEP; }
+const lerp = (a,b,p)=>a+(b-a)*p;
+function dragPx(){ return lerp(DRAG_PX_SLOW, DRAG_PX_FAST, energy); }
+function holdRate(){ return lerp(HOLD_SLOW, HOLD_FAST, energy); }
+
+const UI = "#fs, #over";
+
+// Modelo: el dedo manda.
+//  - dedo levantado      -> no gira
+//  - arrastrando         -> gira en la dirección del arrastre, a su ritmo
+//  - pulsado y quieto    -> sigue en la dirección y al ritmo del último arrastre
+//  - sin arrastre previo -> no gira
+const TAP_MS = 200;        // toque rápido = hard drop
+
+// acelera la ficha normal más avanzada hacia el montón
+function hardDrop(){
+  if (dead) return;
+  let best=null, bd=Infinity;
+  for (const b of flying){
+    if (b.bonus || b.hard || b.k===WHITE) continue;
+    const d = Math.hypot(b.x-ox, b.y-oy);
+    if (d < bd){ bd = d; best = b; }
+  }
+  if (!best) return;
+  best.hard = true;
+  best.sp = Math.max(best.sp, PS*HARD_SPEED);
+}
+
+addEventListener("pointerdown", e=>{
+  if (e.target.closest && e.target.closest(UI)) return;
+  ptrDown = true; dragAcc = 0; dir = 0; rotT = 0; energy = 0;
+  ptrX = e.clientX; lastMoveT = performance.now();
+  ptrT = performance.now(); moved = false;
+}, {passive:true});
+
+addEventListener("pointermove", e=>{
+  if (!ptrDown) return;
+  const now = performance.now();
+  const dt = Math.max(8, now - lastMoveT) / 1000;
+  lastMoveT = now;
+
+  const dx = e.clientX - ptrX;
+  ptrX = e.clientX;
+
+  // energía del gesto: velocidad instantánea suavizada, normalizada a 0..1
+  const inst = Math.min(1, Math.abs(dx)/dt / SPEED_REF);
+  energy += (inst - energy) * SPEED_EMA;
+
+  dragAcc += dx;
+  const px = dragPx();
+  if (Math.abs(dragAcc) >= px){
+    const d = Math.sign(dragAcc);
+    while (Math.abs(dragAcc) >= px){ rotate(d); dragAcc -= d*px; }
+    dir = d;
+    moved = true;
+    rotT = holdRate();
+  }
+}, {passive:true});
+
+function ptrEnd(){
+  if (!ptrDown) return;
+  const quick = (performance.now() - ptrT) < TAP_MS;
+  ptrDown = false; dir = 0; energy = 0;
+  if (!moved && quick) hardDrop();      // toque limpio y rápido
+}
+addEventListener("pointerup", ptrEnd);
+addEventListener("pointercancel", ptrEnd);
+
+addEventListener("keydown", e=>{
+  if (dead && (e.key===" "||e.key==="Enter")){ reset(); return; }
+  if (e.key==="ArrowLeft"||e.key==="a"){ keyDir=-1; }
+  if (e.key==="ArrowRight"||e.key==="d"){ keyDir=1; }
+  if (e.key==="ArrowDown"||e.key==="s"){ e.preventDefault(); hardDrop(); }
+});
+addEventListener("keyup", e=>{
+  if (["ArrowLeft","a","ArrowRight","d"].includes(e.key)) keyDir = 0;
+});
+document.getElementById("over").addEventListener("pointerdown",reset);
+
+// ─── fullscreen ────────────────────────────────────────────────────────────
+const fsEl = document.getElementById("fs");
+function toggleFS(){
+  const d = document.documentElement;
+  if (!document.fullscreenElement && !document.webkitFullscreenElement){
+    (d.requestFullscreen || d.webkitRequestFullscreen || (()=>{})).call(d);
+  } else {
+    (document.exitFullscreen || document.webkitExitFullscreen || (()=>{})).call(document);
+  }
+}
+fsEl.addEventListener("pointerdown", e=>{ e.preventDefault(); e.stopPropagation(); toggleFS(); });
+document.addEventListener("fullscreenchange", ()=>{
+  fsEl.textContent = document.fullscreenElement ? "⛶" : "⛶";
+  setTimeout(resize, 60);
+});
+addEventListener("keydown", e=>{ if (e.key==="f") toggleFS(); });
+
+// ─── dibujo ────────────────────────────────────────────────────────────────
+function bubble(x,y,fill,rad,spec,alpha){
+  cx.globalAlpha = alpha===undefined?1:alpha;
+  cx.beginPath(); cx.arc(x,y,rad,0,7); cx.fillStyle=fill; cx.fill();
+  if (spec){
+    cx.beginPath(); cx.arc(x-rad*0.32,y-rad*0.34,rad*0.24,0,7);
+    cx.fillStyle="rgba(255,255,255,.82)"; cx.fill();
+  }
+  cx.globalAlpha = 1;
+}
+
+function draw(){
+  const g = cx.createRadialGradient(ox,oy,PS*0.05,ox,oy,PS*0.85);
+  g.addColorStop(0,"#141a34"); g.addColorStop(1,"#05050c");
+  cx.fillStyle=g; cx.fillRect(0,0,W,H);
+
+  // frontera
+  let occ=0, far=0;
+  for (let i=0;i<N*N;i++) if (grid[i]) occ++;
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    if (!grid[idx(c,r)]) continue;
+    const [x,y]=cellToWorld(c,r); far=Math.max(far,Math.hypot(x-ox,y-oy));
+  }
+  const prox = Math.min(1, far/R);
+  cx.beginPath(); cx.arc(ox,oy,R,0,7);
+  cx.lineWidth = PS*0.012;
+  cx.strokeStyle = prox>0.82
+    ? `rgba(242,107,58,${0.55+0.45*Math.abs(Math.sin(t*7))})`
+    : "rgba(120,110,230,.75)";
+  cx.stroke();
+
+  // aviso de la próxima ficha: arco de 35° fuera del círculo, en su color
+  if (!dead && nextSpawn && spawnT < TELEGRAPH){
+    const p = 1 - Math.max(0,spawnT)/TELEGRAPH;        // 0 → 1 al acercarse
+    const col = nextSpawn.k===WHITE ? PAINT[WHITE] : COL[nextSpawn.k];
+    const a0 = nextSpawn.aArc - TELEGRAPH_ARC/2, a1 = nextSpawn.aArc + TELEGRAPH_ARC/2;
+    const pulse = 0.35 + 0.65*p*(0.75+0.25*Math.sin(t*11));
+
+    cx.save();
+    cx.lineCap = "round";
+    // halo ancho y difuso
+    cx.globalAlpha = 0.16*pulse;
+    cx.beginPath(); cx.arc(ox,oy,R*1.10,a0,a1);
+    cx.lineWidth = PS*0.085; cx.strokeStyle = col; cx.stroke();
+    // trazo nítido
+    cx.globalAlpha = 0.85*pulse;
+    cx.beginPath(); cx.arc(ox,oy,R*1.055,a0,a1);
+    cx.lineWidth = PS*0.017*(0.6+0.4*p); cx.strokeStyle = col; cx.stroke();
+    cx.restore();
+  }
+
+  const rad = CELL*0.45;
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    const b = grid[idx(c,r)]; if (!b) continue;
+    const vc = b.vc===undefined?c:b.vc, vr = b.vr===undefined?r:b.vr;
+    const [x,y] = cellToWorldF(vc,vr);
+    if (b.k<0){ bubble(x,y,"#0a0a10",rad*1.12,false);
+                cx.beginPath(); cx.arc(x,y,rad*1.12,0,7);
+                cx.strokeStyle="rgba(150,150,190,.35)"; cx.lineWidth=1.5; cx.stroke(); }
+    else {
+      const fl = flashT>0 && flashSet.has(idx(c,r));
+      let fill = b.k===WHITE ? PAINT[WHITE] : (b.k===STONE ? PAINT[STONE] : COL[b.k]);
+      let rr = rad;
+      if (fl){
+        // fundido rápido a blanco + ligero crecimiento antes de desaparecer
+        const p = 1 - flashT/FLASH_TIME;         // 0 → 1
+        const e = p*p*(3-2*p);                   // suavizado
+        fill = mix(fill, "#ffffff", Math.min(1, e*1.35));
+        rr = rad*(1 + 0.30*e);
+        cx.save();
+        cx.globalAlpha = 0.55*(1-e);
+        cx.beginPath(); cx.arc(x,y,rad*(1.2+1.1*e),0,7);
+        cx.fillStyle = "#ffffff"; cx.fill();
+        cx.restore();
+      }
+      bubble(x,y,fill,rr, !fl && b.k!==STONE);
+      if (b.k===WHITE && !fl){
+        cx.beginPath(); cx.arc(x,y,rad,0,7);
+        cx.strokeStyle="rgba(120,120,140,.7)"; cx.lineWidth=1.5; cx.stroke();
+      }
+      if (!fl && b.k!==WHITE && b.k!==STONE && b.age > STONE_WARN){
+        // aviso: anillo gris que engorda. Empieza lento y discreto, y solo
+        // acelera al acercarse la petrificación: urgencia, no ansiedad constante.
+        const p = (b.age-STONE_WARN)/(STONE_TIME-STONE_WARN);
+        const freq  = 1.8 + 11*p*p;
+        const pulse = (0.30 + 0.55*p) * (0.62 + 0.38*Math.abs(Math.sin(b.age*freq)));
+        cx.globalAlpha = pulse;
+        cx.beginPath(); cx.arc(x,y,rad*0.99,0,7);
+        cx.strokeStyle = PAINT[STONE];
+        cx.lineWidth = rad*(0.08+0.46*p*p);
+        cx.stroke();
+        cx.globalAlpha = 1;
+      }
+    }
+  }
+
+  for (const b of flying){
+    if (b.bonus){
+      cx.beginPath();
+      for (let i=0;i<b.trail.length;i++){
+        const [tx,ty]=b.trail[i]; i?cx.lineTo(tx,ty):cx.moveTo(tx,ty);
+      }
+      cx.strokeStyle="rgba(242,107,58,.45)"; cx.lineWidth=rad*0.5; cx.stroke();
+      const pu = 1+0.18*Math.sin(t*18);
+      bubble(b.x,b.y,"#f26b3a",rad*1.05*pu,true);
+    } else {
+      if (b.hard){
+        cx.beginPath();
+        for (let i=0;i<b.trail.length;i++){
+          const [tx,ty]=b.trail[i]; i?cx.lineTo(tx,ty):cx.moveTo(tx,ty);
+        }
+        cx.strokeStyle="rgba(255,255,255,.30)"; cx.lineWidth=rad*0.9; cx.lineCap="round";
+        cx.stroke();
+      }
+      bubble(b.x,b.y, b.k===WHITE?PAINT[WHITE]:COL[b.k], rad, true);
+      if (b.hard){
+        cx.beginPath(); cx.arc(b.x,b.y,rad*1.45,0,7);
+        cx.strokeStyle="rgba(255,255,255,.55)"; cx.lineWidth=rad*0.16; cx.stroke();
+      }
+    }
+  }
+  drawFloaters();
+
+  // banner de aviso del nuevo color
+  if (banner > 0){
+    const a = Math.min(1, banner/0.5) * Math.min(1, (2.6-banner)/0.25);
+    cx.save();
+    cx.globalAlpha = a;
+    cx.font = `700 ${Math.round(PS*0.055)}px ui-monospace, Menlo, Consolas, monospace`;
+    cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.lineWidth = PS*0.010; cx.strokeStyle = "rgba(4,4,12,.9)";
+    cx.strokeText("NUEVO COLOR", ox, oy - PS*0.30);
+    cx.fillStyle = COL[4];
+    cx.fillText("NUEVO COLOR", ox, oy - PS*0.30);
+    cx.beginPath(); cx.arc(ox, oy - PS*0.22, PS*0.028, 0, 7);
+    cx.fillStyle = COL[4]; cx.fill();
+    cx.restore();
+  }
+}
+function mix(a,b,p){
+  const h=s=>[1,3,5].map(i=>parseInt(s.substr(i,2),16));
+  const A=h(a),B=h(b);
+  return `rgb(${A.map((v,i)=>Math.round(v+(B[i]-v)*p)).join(",")})`;
+}
+
+// ─── loop ──────────────────────────────────────────────────────────────────
+const segs=[];
+for (let i=0;i<4;i++){ const d=document.createElement("div"); d.className="seg";
+  document.getElementById("gauge").appendChild(d); segs.push(d); }
+
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.05,(now-last)/1000); last = now;
+
+  if (!dead){
+    t += dt;
+    // gira solo si el dedo está apoyado (o una tecla pulsada)
+    if (keyDir){
+      rotT -= dt;
+      if (rotT <= 0){ rotate(keyDir); rotT = HOLD_KEY; }
+    } else if (ptrDown && dir){
+      rotT -= dt;
+      if (rotT <= 0){ rotate(dir); rotT = holdRate(); }
+    } else rotT = 0;
+    angle += (angleT-angle)*Math.min(1,ROT_TWEEN*dt);
+
+    spawnT -= dt;
+    if (spawnT<=0){
+      spawnNormal(nextSpawn);
+      nextSpawn = pickNext();
+      spawnT = SPAWN_MIN + (SPAWN_START-SPAWN_MIN)*Math.exp(-t/SPAWN_RAMP*1.6);
+    }
+    // ciclo propio de las blancas, ajeno al de las fichas de color
+    if (t > WHITE_START){
+      whiteT -= dt;
+      if (whiteT <= 0){
+        spawnWhite();
+        whiteT = WHITE_INT_MIN + (WHITE_INT_START-WHITE_INT_MIN)*
+                 Math.exp(-(t-WHITE_START)/WHITE_INT_RAMP*1.6);
+      }
+    }
+    // aviso único de la entrada del morado
+    if (!purpleShown && t > PURPLE_START){ purpleShown = true; banner = 2.6; }
+
+    // el bonus se lanza solo al llenarse el medidor
+    if (gauge >= 4){ gauge = 0; spawnBonus(4); }
+
+    stepFlying(dt);
+    ageBubbles(dt);
+    checkDead();
+  }
+  if (banner > 0) banner -= dt;
+  stepFlash(dt);
+  easeVisual(dt);
+  stepFloaters(dt);
+
+  draw();
+  document.getElementById("score").textContent = score;
+  const lv = Math.floor(gauge);
+  segs.forEach((s,i)=>s.classList.toggle("on", i<lv));
+  if (dead){
+    document.getElementById("over").style.display="flex";
+    document.getElementById("fin").textContent = score+" puntos";
+  }
+  requestAnimationFrame(frame);
+}
+
+resize(); reset(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
