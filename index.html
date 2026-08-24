@@ -3,37 +3,60 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>Prototipo — montón rotatorio</title>
+<title>Whirlpop</title>
+<meta name="description" content="Whirlpop — juego arcade de piezas que caen sobre un tablero que gira.">
+<meta name="theme-color" content="#06060c">
+<!-- nombre con el que se guarda en la pantalla de inicio en iOS -->
+<meta name="apple-mobile-web-app-title" content="Whirlpop">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- previsualización al compartir la URL -->
+<meta property="og:title" content="Whirlpop">
+<meta property="og:description" content="Juego arcade de piezas que caen sobre un tablero que gira.">
+<meta property="og:type" content="website">
 <style>
+  /* La columna vertical de la que cuelga todo el layout. El JS la reescribe en
+     cada resize; este valor es el fallback hasta que arranca. --u = 1% de la
+     columna: toda medida de UI se expresa en múltiplos suyos, con suelo en px. */
+  :root { --stage: min(100vw, 64.5vh);
+          --u: calc(var(--stage) / 100); }
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { width:100%; height:100%; overflow:hidden; background:#06060c;
               user-select:none; -webkit-user-select:none;
               font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
   #c { display:block; width:100%; height:100%; touch-action:none; }
-  #hud { position:fixed; top:10px; left:0; right:0; display:flex; justify-content:center;
-         gap:18px; align-items:center; pointer-events:none; color:#cfd2e6; font-size:15px;
-         letter-spacing:1px; }
-  #gauge { display:flex; gap:4px; }
-  .seg { width:26px; height:11px; border:1.5px solid #6f74a8; border-radius:2px; }
+  #hud { position:fixed; top:calc(var(--u)*2); left:50%; transform:translateX(-50%);
+         width:var(--stage); display:flex; justify-content:center;
+         gap:calc(var(--u)*3.6); align-items:center; pointer-events:none; color:#cfd2e6;
+         font-size:max(12px, calc(var(--u)*3.05)); letter-spacing:1px; }
+  #gauge { display:flex; gap:calc(var(--u)*0.8); }
+  .seg { width:calc(var(--u)*5.3); height:calc(var(--u)*2.25);
+         border:max(1px, calc(var(--u)*0.3)) solid #6f74a8; border-radius:2px; }
   .seg.on { background:#f26b3a; border-color:#f26b3a; }
   .btn { min-width:132px; padding:0 16px; height:52px; border:1.5px solid #4a4f7a;
          border-radius:8px; background:rgba(30,34,60,.55); color:#cfd2e6; font-size:15px;
          letter-spacing:2px; font-family:inherit; display:flex; align-items:center;
          justify-content:center; user-select:none; cursor:pointer; }
-  #fs { position:fixed; top:8px; right:10px; width:38px; height:38px; display:flex;
-        align-items:center; justify-content:center; border:1.5px solid #3a3f68;
-        border-radius:7px; background:rgba(30,34,60,.5); color:#9aa0cc; font-size:17px;
+  #fs { position:fixed; top:calc(var(--u)*1.6);
+        right:calc(50% - var(--stage)/2 + var(--u)*2);
+        width:max(34px, calc(var(--u)*7.7)); height:max(34px, calc(var(--u)*7.7));
+        display:flex; align-items:center; justify-content:center; border:1.5px solid #3a3f68;
+        border-radius:7px; background:rgba(30,34,60,.5); color:#9aa0cc;
+        font-size:max(15px, calc(var(--u)*3.4));
         cursor:pointer; user-select:none; z-index:5; }
   #fs:active { background:rgba(70,80,140,.75); }
-  #hint { position:fixed; bottom:20px; left:0; right:0; text-align:center; font-size:11px;
+  #hint { position:fixed; bottom:calc(var(--u)*4); left:50%; transform:translateX(-50%);
+          width:var(--stage); padding:0 calc(var(--u)*3); text-align:center;
+          font-size:max(9.5px, calc(var(--u)*2.25)); line-height:1.55; text-wrap:balance;
           letter-spacing:1px; color:#5c6090; pointer-events:none; }
   .btn:active { background:rgba(70,80,140,.75); }
   .btn.arm { border-color:#f26b3a; color:#f26b3a; }
-  #over { position:fixed; inset:0; display:none; flex-direction:column; gap:10px;
+  #over { position:fixed; inset:0; display:none; flex-direction:column; gap:calc(var(--u)*2);
           align-items:center; justify-content:center; background:rgba(4,4,10,.82);
-          color:#e8e8f4; font-size:20px; letter-spacing:2px; cursor:pointer; }
-  #over b { font-size:34px; color:#f26b3a; letter-spacing:4px; }
-  #over small { font-size:13px; color:#8a8fb8; letter-spacing:1px; }
+          color:#e8e8f4; font-size:max(16px, calc(var(--u)*4)); letter-spacing:2px;
+          cursor:pointer; }
+  #over b { font-size:max(26px, calc(var(--u)*6.9)); color:#f26b3a; letter-spacing:4px; }
+  #over small { font-size:max(11px, calc(var(--u)*2.65)); color:#8a8fb8; letter-spacing:1px; }
 </style>
 </head>
 <body>
@@ -49,6 +72,10 @@
 // ─── config ────────────────────────────────────────────────────────────────
 const N = 15, C = (N-1)/2;
 const R_FACTOR = 0.46;
+// mobile first: el layout es siempre una columna vertical. STAGE es su ancho, y
+// de él sale todo el tamaño del juego. Único número para abrir o cerrar la
+// columna en todas las pantallas a la vez.
+const STAGE_ASPECT = 0.645;
 const ROT_STEP = 7.5 * Math.PI/180;
 const ROT_TWEEN = 26;      // seguimiento de angle hacia angleT; a 340°/s un valor bajo va elástico
 const CHAIN_MIN = 3;
@@ -75,7 +102,7 @@ function numColors(){ return t > PURPLE_START ? 5 : 4; }
 
 // ─── estado ────────────────────────────────────────────────────────────────
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
-let W,H,PS,R,CELL,ox,oy;
+let W,H,STAGE,PS,R,CELL,ox,oy;
 let grid, angle, angleT, flying, score, gauge, t, spawnT, dead, nextSpawn, whiteT, lastColorAngle;
 let purpleShown, banner;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
@@ -104,11 +131,26 @@ function reset(){
 }
 
 function resize(){
-  W = cv.width = innerWidth; H = cv.height = innerHeight;
-  PS = Math.min(W,H); R = PS*R_FACTOR; CELL = R*2/N;
+  W = innerWidth; H = innerHeight;
+  STAGE = Math.min(W, H*STAGE_ASPECT);
+  document.documentElement.style.setProperty("--stage", STAGE+"px");
+
+  // buffer a resolución de dispositivo, dibujo en px CSS. Redimensionar el
+  // canvas resetea la matriz, así que la transformación se reaplica aquí.
+  const DPR = Math.min(3, devicePixelRatio || 1);
+  cv.width  = Math.round(W*DPR);
+  cv.height = Math.round(H*DPR);
+  cv.style.width = W+"px"; cv.style.height = H+"px";
+  cx.setTransform(DPR,0,0,DPR,0,0);
+
+  // el canvas ocupa la ventana entera — solo el fondo se expande a lo ancho —,
+  // pero el juego mide la columna, no el viewport.
+  PS = STAGE; R = PS*R_FACTOR; CELL = R*2/N;
   ox = W/2; oy = H/2;
 }
 addEventListener("resize", resize);
+// en móvil el alto real llega tarde al girar el dispositivo
+addEventListener("orientationchange", ()=>setTimeout(resize,120));
 
 // ─── conversiones ──────────────────────────────────────────────────────────
 function cellToWorldF(fc,fr){
@@ -132,6 +174,8 @@ function pickNext(){
   const a = aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82;   // dentro del arco
   return { aArc, a, k };
 }
+// Las fichas nacen justo fuera del círculo, en la zona que acaba de marcar el
+// arco de aviso, y ya con su velocidad normal.
 function spawnNormal(n){
   const a = n.a, d = PS*0.52;
   lastColorAngle = a;
@@ -211,6 +255,7 @@ function land(b, hit){
   if (!cell) return;
 
   grid[idx(cell[0],cell[1])] = { k:b.k, age:0, vc:fc, vr:fr };
+  refreshGroup(cell[0], cell[1]);
   resolve();
 }
 function ringSearch(c0,r0){
@@ -224,6 +269,28 @@ function ringSearch(c0,r0){
 }
 
 // ─── cadenas, colateral, gravedad ──────────────────────────────────────────
+// Un match de 2 no estalla, pero reinicia el reloj de petrificación de las dos
+// fichas: da una vía para gestionar una piedra incipiente sin necesidad de
+// cerrar un match de 3. Se evalúa sobre el grupo de la ficha recién aterrizada;
+// un grupo de 3 o más no lo necesita, porque va a estallar.
+function refreshGroup(c,r){
+  const g = grid[idx(c,r)];
+  if (!g || g.k<0 || g.k===WHITE || g.k===STONE) return;
+  const seen = new Uint8Array(N*N), st=[[c,r]], grp=[];
+  seen[idx(c,r)]=1;
+  while (st.length){
+    const [a,b] = st.pop(); grp.push(idx(a,b));
+    for (const [dc,dr] of NB){
+      const p=a+dc, q=b+dr;
+      if (!inb(p,q) || seen[idx(p,q)]) continue;
+      const h = grid[idx(p,q)];
+      if (h && h.k===g.k){ seen[idx(p,q)]=1; st.push([p,q]); }
+    }
+  }
+  if (grp.length < 2 || grp.length >= CHAIN_MIN) return;
+  grp.forEach(i=>{ grid[i].age = 0; });
+}
+
 function findPops(){
   const seen = new Uint8Array(N*N), out = new Set();
   for (let r=0;r<N;r++) for (let c=0;c<N;c++){
@@ -696,7 +763,10 @@ function bubble(x,y,fill,rad,spec,alpha){
 }
 
 function draw(){
-  const g = cx.createRadialGradient(ox,oy,PS*0.05,ox,oy,PS*0.85);
+  // el degradado se estira hasta la esquina más lejana: en horizontal es lo
+  // que llena los laterales, en vertical apenas cambia.
+  const gR = Math.max(PS*0.85, Math.hypot(W,H)/2);
+  const g = cx.createRadialGradient(ox,oy,PS*0.05,ox,oy,gR);
   g.addColorStop(0,"#141a34"); g.addColorStop(1,"#05050c");
   cx.fillStyle=g; cx.fillRect(0,0,W,H);
 

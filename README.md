@@ -27,4 +27,3 @@ está en ese fichero.
 - `index.html` — el juego completo: lógica, estilos y assets en un solo fichero.
 - `.nojekyll` — evita que GitHub Pages procese el sitio con Jekyll.
 - `.gitignore` — ficheros que no se versionan (temporales del sistema y de editores).
-- `specs/` — las specs de cada fase de desarrollo, versionadas junto al código.
