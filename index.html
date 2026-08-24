@@ -7,6 +7,7 @@
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { width:100%; height:100%; overflow:hidden; background:#06060c;
+              user-select:none; -webkit-user-select:none;
               font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
   #c { display:block; width:100%; height:100%; touch-action:none; }
   #hud { position:fixed; top:10px; left:0; right:0; display:flex; justify-content:center;
@@ -49,7 +50,7 @@
 const N = 15, C = (N-1)/2;
 const R_FACTOR = 0.46;
 const ROT_STEP = 7.5 * Math.PI/180;
-const ROT_TWEEN = 16;
+const ROT_TWEEN = 26;      // seguimiento de angle hacia angleT; a 340°/s un valor bajo va elástico
 const CHAIN_MIN = 3;
 const SPAWN_START = 1.8, SPAWN_MIN = 0.95, SPAWN_RAMP = 380;
 const BUBBLE_SPEED = 0.185;                 // velocidad inicial
@@ -77,7 +78,8 @@ const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,PS,R,CELL,ox,oy;
 let grid, angle, angleT, flying, score, gauge, t, spawnT, dead, nextSpawn, whiteT, lastColorAngle;
 let purpleShown, banner;
-let dir, keyDir, rotT, dragAcc, ptrDown, ptrX, energy, lastMoveT, ptrT, moved;
+let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
+let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
 
 function idx(c,r){ return r*N+c; }
 function inb(c,r){ return c>=0&&c<N&&r>=0&&r<N; }
@@ -95,8 +97,9 @@ function reset(){
   { const aArc = Math.random()*Math.PI*2;
     nextSpawn = { aArc, a: aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82,
                   k: Math.floor(Math.random()*4) }; }  // arranque: sin morado
-  dir = 0; keyDir = 0; rotT = 0; dragAcc = 0;
-  ptrDown = false; ptrX = 0; energy = 0; lastMoveT = 0; ptrT = 0; moved = false;
+  dir = 0; rotT = 0; dragAcc = 0;
+  ptrDown = false; ptrId = null; ptrX = 0; energy = 0; lastMoveT = 0; ptrT = 0; ptrMoved = false;
+  heldKeys = []; keyDir = 0; keyMode = "idle"; keyHoldT = 0; keyRamp = 0; keyIdleT = 0;
   document.getElementById("over").style.display = "none";
 }
 
@@ -260,7 +263,7 @@ function findPops(){
 // cada ficha desliza hasta quedar bloqueada, sin dejar fichas flotando a medias.
 // No es recursiva: no vuelve a lanzarse sola, la llama quien provoca el estallido.
 function gravityPass(){
-  let moved = false;
+  let anyMoved = false;
   for (let sweep=0; sweep<N*2; sweep++){
     const cells = [];
     for (let r=0;r<N;r++) for (let c=0;c<N;c++){
@@ -283,14 +286,14 @@ function gravityPass(){
         for (const [p,s] of opts){
           if ((p===c && s===r) || !inb(p,s) || grid[idx(p,s)]) continue;
           grid[idx(p,s)] = grid[idx(c,r)]; grid[idx(c,r)] = null;
-          c=p; r=s; did = any = moved = true; break;
+          c=p; r=s; did = any = anyMoved = true; break;
         }
         if (!did) break;
       }
     }
     if (!any) break;                                  // ya está estable
   }
-  return moved;
+  return anyMoved;
 }
 
 // separa el conjunto estallado en grupos conexos, para un texto por match
@@ -493,27 +496,65 @@ function checkDead(){
 // ─── input ─────────────────────────────────────────────────────────────────
 // La velocidad angular sale de la "energía" del gesto: un arrastre corto y lento
 // gira despacio; uno amplio y rápido gira deprisa.
-const DRAG_PX_SLOW = 18;   // px por paso con gesto suave
-const DRAG_PX_FAST = 7;    // px por paso con gesto enérgico
-const HOLD_SLOW = 0.125;   // periodo del giro mantenido, gesto suave
-const HOLD_FAST = 0.028;   // periodo del giro mantenido, gesto enérgico
-const SPEED_REF = 1400;    // px/s considerados gesto enérgico
-const SPEED_EMA = 0.30;    // suavizado de la medida de velocidad
-const HOLD_KEY = 0.055;    // periodo fijo para teclado
+//
+// Dos perfiles de constantes, no dos modos: NO hay detección de dispositivo.
+// Cada pointerdown elige perfil por su propio e.pointerType, así que un portátil
+// táctil alterna dedo y ratón en la misma sesión sin recargar. "pen" va con táctil.
+const PROFILE = {
+  touch: {
+    DRAG_PX_SLOW: 18,      // px por paso con gesto suave
+    DRAG_PX_FAST: 7,       // px por paso con gesto enérgico
+    SPEED_REF:    1400,    // px/s considerados gesto enérgico
+    SPEED_EMA:    0.30,    // suavizado de la medida de velocidad
+    HOLD_SLOW:    0.125,   // periodo del giro mantenido, gesto suave
+    HOLD_FAST:    0.028,   // periodo del giro mantenido, gesto enérgico
+    TAP_MS:       200      // toque rápido sin arrastre = hard drop
+  },
+  mouse: {
+    DRAG_PX_SLOW: 26,
+    DRAG_PX_FAST: 10,
+    SPEED_REF:    2600,    // con 1400 el ratón satura y energy se queda en 1
+    SPEED_EMA:    0.30,
+    // ── los dos números a tocar para calibrar el mantenido con ratón ──
+    HOLD_SLOW:    0.125,   // iguales al táctil a propósito; pendiente de probar en pantalla
+    HOLD_FAST:    0.028,
+    TAP_MS:       300      // un clic con intención de disparo pasa de 200 ms a menudo
+  }
+};
+let prof = PROFILE.touch;
+
+// teclado: toque corto = un paso discreto; mantenido = velocidad angular creciente
+const KEY_DAS         = 0.16;   // s antes de pasar de paso discreto a continuo
+const KEY_W_MIN       = 70;     // °/s al arrancar el continuo (un toque cada DAS ≈ 47°/s)
+const KEY_W_MAX       = 340;    // °/s al final de la rampa
+const KEY_RAMP_TIME   = 0.75;   // s hasta velocidad máxima
+const KEY_RAMP_RETAIN = 0.20;   // s que la rampa se conserva tras soltar todo
+const KEY_RAMP_DECAY  = 0.35;   // s de decaimiento a cero tras la retención
+const DEG = Math.PI/180;
 
 function rotate(d){ angleT += d*ROT_STEP; }
 const lerp = (a,b,p)=>a+(b-a)*p;
-function dragPx(){ return lerp(DRAG_PX_SLOW, DRAG_PX_FAST, energy); }
-function holdRate(){ return lerp(HOLD_SLOW, HOLD_FAST, energy); }
+function dragPx(){ return lerp(prof.DRAG_PX_SLOW, prof.DRAG_PX_FAST, energy); }
+function holdRate(){ return lerp(prof.HOLD_SLOW, prof.HOLD_FAST, energy); }
 
 const UI = "#fs, #over";
+
+// el hint de hoy es literalmente falso con ratón: se reescribe con el input real.
+const HINT_TOUCH = "arrastra para girar · mantén para seguir · toca para hard drop · el bonus sale solo";
+const HINT_MOUSE = "arrastra con el botón izquierdo para girar · mantén para seguir · clic para hard drop · flechas para ajuste fino · el bonus sale solo";
+const hintEl = document.getElementById("hint");
+// único uso de media queries de input en todo el juego, y solo para el texto inicial
+hintEl.textContent = matchMedia("(pointer: fine)").matches ? HINT_MOUSE : HINT_TOUCH;
+function setHint(pointerType){
+  hintEl.textContent = pointerType === "mouse" ? HINT_MOUSE : HINT_TOUCH;
+}
 
 // Modelo: el dedo manda.
 //  - dedo levantado      -> no gira
 //  - arrastrando         -> gira en la dirección del arrastre, a su ritmo
 //  - pulsado y quieto    -> sigue en la dirección y al ritmo del último arrastre
 //  - sin arrastre previo -> no gira
-const TAP_MS = 200;        // toque rápido = hard drop
+// El ratón entra por este mismo camino, solo con otro perfil de constantes.
 
 // acelera la ficha normal más avanzada hacia el montón
 function hardDrop(){
@@ -529,15 +570,25 @@ function hardDrop(){
   best.sp = Math.max(best.sp, PS*HARD_SPEED);
 }
 
-addEventListener("pointerdown", e=>{
+// Los listeners cuelgan del canvas, no de window, para poder capturar el puntero:
+// sin captura, sacar el ratón de la ventana con el botón apretado se come el
+// pointerup y el tablero se queda girando solo.
+cv.addEventListener("pointerdown", e=>{
+  if (e.button !== 0) return;                        // solo botón izquierdo
+  if (ptrDown) return;                               // un solo puntero por gesto
   if (e.target.closest && e.target.closest(UI)) return;
+  e.preventDefault();                                // sin arrastre fantasma del navegador
+  prof = e.pointerType === "mouse" ? PROFILE.mouse : PROFILE.touch;
+  setHint(e.pointerType);
+  ptrId = e.pointerId;
+  try { cv.setPointerCapture(e.pointerId); } catch(_){}
   ptrDown = true; dragAcc = 0; dir = 0; rotT = 0; energy = 0;
   ptrX = e.clientX; lastMoveT = performance.now();
-  ptrT = performance.now(); moved = false;
-}, {passive:true});
+  ptrT = performance.now(); ptrMoved = false;
+}, {passive:false});
 
-addEventListener("pointermove", e=>{
-  if (!ptrDown) return;
+cv.addEventListener("pointermove", e=>{
+  if (!ptrDown || e.pointerId !== ptrId) return;
   const now = performance.now();
   const dt = Math.max(8, now - lastMoveT) / 1000;
   lastMoveT = now;
@@ -546,8 +597,8 @@ addEventListener("pointermove", e=>{
   ptrX = e.clientX;
 
   // energía del gesto: velocidad instantánea suavizada, normalizada a 0..1
-  const inst = Math.min(1, Math.abs(dx)/dt / SPEED_REF);
-  energy += (inst - energy) * SPEED_EMA;
+  const inst = Math.min(1, Math.abs(dx)/dt / prof.SPEED_REF);
+  energy += (inst - energy) * prof.SPEED_EMA;
 
   dragAcc += dx;
   const px = dragPx();
@@ -555,29 +606,65 @@ addEventListener("pointermove", e=>{
     const d = Math.sign(dragAcc);
     while (Math.abs(dragAcc) >= px){ rotate(d); dragAcc -= d*px; }
     dir = d;
-    moved = true;
+    ptrMoved = true;
     rotT = holdRate();
   }
 }, {passive:true});
 
-function ptrEnd(){
+// drop=false cierra el gesto sin disparar: cancelación, pérdida de captura o de foco.
+function ptrEnd(drop){
   if (!ptrDown) return;
-  const quick = (performance.now() - ptrT) < TAP_MS;
-  ptrDown = false; dir = 0; energy = 0;
-  if (!moved && quick) hardDrop();      // toque limpio y rápido
+  const quick = (performance.now() - ptrT) < prof.TAP_MS;
+  ptrDown = false; ptrId = null; dir = 0; energy = 0;
+  if (drop && !ptrMoved && quick) hardDrop();      // toque limpio y rápido
 }
-addEventListener("pointerup", ptrEnd);
-addEventListener("pointercancel", ptrEnd);
+cv.addEventListener("pointerup", e=>{ if (e.pointerId === ptrId) ptrEnd(true); });
+cv.addEventListener("pointercancel", e=>{ if (e.pointerId === ptrId) ptrEnd(false); });
+cv.addEventListener("lostpointercapture", e=>{ if (e.pointerId === ptrId) ptrEnd(false); });
+cv.addEventListener("contextmenu", e=> e.preventDefault());
+
+// ── teclado ───────────────────────────────────────────────────────────────
+// Toque corto = un paso discreto exacto. Mantenido = velocidad angular creciente.
+// Por e.code, no por e.key: con Shift o Bloq Mayús llega "A"/"D" y el keyup no
+// matchearía, dejando la rotación enganchada. Y heldKeys es una pila, no un
+// escalar: soltar ← teniendo → pulsada tiene que seguir girando a la derecha.
+const KEY_DIRS = { ArrowLeft:-1, KeyA:-1, ArrowRight:1, KeyD:1 };
+function recalcKeyDir(){
+  keyDir = heldKeys.length ? KEY_DIRS[heldKeys[heldKeys.length-1]] : 0;
+}
 
 addEventListener("keydown", e=>{
   if (dead && (e.key===" "||e.key==="Enter")){ reset(); return; }
-  if (e.key==="ArrowLeft"||e.key==="a"){ keyDir=-1; }
-  if (e.key==="ArrowRight"||e.key==="d"){ keyDir=1; }
+  if (KEY_DIRS[e.code] !== undefined){
+    e.preventDefault();
+    if (e.repeat) return;                  // la repetición la conduce el juego, no el SO
+    if (heldKeys.indexOf(e.code) < 0) heldKeys.push(e.code);
+    recalcKeyDir();
+    // en pleno barrido, invertir es instantáneo y a la misma velocidad:
+    // ni paso discreto, ni DAS de nuevo, ni perder la rampa.
+    if (keyMode === "continuous") return;
+    rotate(keyDir); keyHoldT = 0; keyMode = "pending";
+    return;
+  }
   if (e.key==="ArrowDown"||e.key==="s"){ e.preventDefault(); hardDrop(); }
 });
 addEventListener("keyup", e=>{
-  if (["ArrowLeft","a","ArrowRight","d"].includes(e.key)) keyDir = 0;
+  if (KEY_DIRS[e.code] === undefined) return;
+  const i = heldKeys.indexOf(e.code);
+  if (i >= 0) heldKeys.splice(i,1);
+  recalcKeyDir();
+  // si queda otra pulsada se sigue como se estaba, misma rampa y sin DAS
+  if (!keyDir){ keyMode = "idle"; keyIdleT = 0; }
 });
+
+// Alt-Tab o salir de la ventana con algo pulsado no puede dejar el tablero girando.
+function loseInput(){
+  ptrEnd(false);
+  heldKeys = []; keyDir = 0; keyMode = "idle"; keyHoldT = 0; keyRamp = 0; keyIdleT = 0;
+}
+addEventListener("blur", loseInput);
+document.addEventListener("visibilitychange", ()=>{ if (document.hidden) loseInput(); });
+
 document.getElementById("over").addEventListener("pointerdown",reset);
 
 // ─── fullscreen ────────────────────────────────────────────────────────────
@@ -753,11 +840,24 @@ function frame(now){
 
   if (!dead){
     t += dt;
-    // gira solo si el dedo está apoyado (o una tecla pulsada)
-    if (keyDir){
-      rotT -= dt;
-      if (rotT <= 0){ rotate(keyDir); rotT = HOLD_KEY; }
-    } else if (ptrDown && dir){
+    // teclado: DAS, rampa continua y decaimiento de la rampa al soltar
+    if (keyMode === "pending"){
+      keyHoldT += dt;
+      if (keyHoldT >= KEY_DAS) keyMode = "continuous";
+    } else if (keyMode === "idle"){
+      keyIdleT += dt;
+      // se retiene un instante: soltar y repulsar en mitad de un barrido no frena
+      if (keyIdleT > KEY_RAMP_RETAIN)
+        keyRamp = Math.max(0, keyRamp - dt/KEY_RAMP_DECAY);
+    }
+    if (keyMode === "continuous" && keyDir){
+      keyRamp = Math.min(1, keyRamp + dt/KEY_RAMP_TIME);
+      // cuadrática: arranque contenido para el control, apertura para los barridos
+      const w = KEY_W_MIN + (KEY_W_MAX-KEY_W_MIN)*keyRamp*keyRamp;
+      angleT += keyDir * w*DEG * dt;
+    }
+    // gira solo si el dedo está apoyado; con tecla pulsada manda el teclado
+    if (!keyDir && ptrDown && dir){
       rotT -= dt;
       if (rotT <= 0){ rotate(dir); rotT = holdRate(); }
     } else rotT = 0;
