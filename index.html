@@ -35,10 +35,34 @@
          display:flex; justify-content:space-around; align-items:flex-start;
          pointer-events:none; }
   .hblock { display:flex; flex-direction:column; align-items:center; }
-  .hlabel { font-size:max(9.5px, calc(var(--u)*2.25)); letter-spacing:2px;
+  /* .lvl-n comparte la regla de las etiquetas del HUD, no la copia: "NIVEL 3" es
+     rótulo, del mismo rango que SCORE, no un dato que se consulte. En una sola
+     regla no pueden separarse al retocar cualquiera de las dos. */
+  .hlabel, .lvl-n { font-size:max(12px, calc(var(--u)*2.9)); letter-spacing:2px;
             line-height:1.3; color:#5c6090; }
   .hval   { font-size:max(22px, calc(var(--u)*6.2)); letter-spacing:1px;
             line-height:1.3; color:#cfd2e6; }
+  /* Nivel y micro-tutorial: mismo esqueleto que el HUD, en la franja de arriba.
+     La línea "NIVEL X" es permanente y su altura se descuenta del lift en
+     resize(). El tip es absolute respecto al bloque, así que NO aporta altura:
+     la esfera no salta al aparecer ni al irse el texto, que simplemente se
+     superpone sobre la franja alta del área de juego. */
+  #lvl { position:fixed; left:50%; transform:translateX(-50%); width:var(--stage);
+         top:max(calc(var(--u)*2.4), env(safe-area-inset-top));
+         text-align:center; pointer-events:none; }
+  /* El tip es la única prosa del juego: se lee una vez, corriendo y a contrarreloj.
+     Rompe el monoespaciado del resto de la interfaz a propósito —una frase larga
+     en mono se lee peor— y se separa de la línea de nivel para que no se lean
+     como un mismo bloque. El fade es asimétrico: entra rápido para no hacerse
+     esperar, sale despacio para no cortar al que todavía está leyendo; la clase
+     .on conmuta las dos duraciones. */
+  .lvl-tip { position:absolute; top:calc(100% + var(--u)*3.2); left:50%;
+             transform:translateX(-50%);
+             width:84%; font-size:max(15px, calc(var(--u)*3.6)); line-height:1.5;
+             font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+             color:#cfd2e6; text-shadow:0 1px 6px rgba(4,4,12,.95);
+             opacity:0; transition:opacity .6s ease; }
+  .lvl-tip.on { opacity:1; transition:opacity .3s ease; }
   .btn { min-width:132px; padding:0 16px; height:52px; border:1.5px solid #4a4f7a;
          border-radius:8px; background:rgba(30,34,60,.55); color:#cfd2e6; font-size:15px;
          letter-spacing:2px; font-family:inherit; display:flex; align-items:center;
@@ -70,6 +94,10 @@
   <div class="hblock"><span class="hlabel">SCORE</span><span class="hval" id="score">0</span></div>
   <div class="hblock"><span class="hlabel">PERSONAL BEST</span><span class="hval" id="bestv">0</span></div>
 </div>
+<div id="lvl">
+  <div class="lvl-n">NIVEL 1</div>
+  <div class="lvl-tip"></div>
+</div>
 <div id="fs">⛶</div>
 <div id="over"><b>GAME OVER</b><span id="fin">0</span><small>toca para reiniciar</small></div>
 
@@ -93,7 +121,7 @@ const HARD_SPEED   = 0.95;                  // velocidad mínima tras hard drop
 const HARD_ACCEL   = 0.55;                  // y sigue acelerando más fuerte
 const SPIRAL_TANGENT = 2.1, SPIRAL_INWARD = 0.085;
 // las blancas son una entidad independiente: su propio reloj, su propia velocidad
-const WHITE_START = 22, WHITE_INT_START = 14, WHITE_INT_MIN = 7.0, WHITE_INT_RAMP = 340;
+const WHITE_INT_START = 14, WHITE_INT_MIN = 7.0, WHITE_INT_RAMP = 340;
 const WHITE_SPEED = 0.115, WHITE_ACCEL = 0.035;
 const WHITE_SPREAD = 50 * Math.PI/180;   // dispersión alrededor del punto opuesto
 const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
@@ -104,6 +132,10 @@ const TELEGRAPH_ARC = 35 * Math.PI/180;     // amplitud del aviso
 const LIFT_K   = 0.5;      // fracción de la altura sobrante que se consume
 const LIFT_MAX = 0.14;     // tope duro en fracción de STAGE — calibrar en dispositivo
 const TOP_KEEP = 0.09;     // aire mínimo sobre la zona de juego, múltiplo de PS
+// franja que ocupa la línea "NIVEL X", múltiplo de PS: el margen superior (2.4u)
+// más su caja de texto (2.9u de cuerpo por 1.3 de interlínea) y un poco de aire.
+// Si se retoca el cuerpo de .hlabel hay que rehacer esta cuenta.
+const LVL_BAND = 0.08;
 
 // Los tres anillos concéntricos —gauge, frontera y aviso de salida— forman una
 // sola familia: cada uno hacia fuera es 1.5x el anterior, y el aire entre trazos
@@ -118,24 +150,95 @@ const TELE_HALO_W = 0.085;       // resplandor del aviso: fuera de la progresió
 const GAUGE_A0    = Math.PI;     // ancla: 9 en punto
 const GAUGE_TWEEN = 11;          // seguimiento del valor visual hacia el lógico
 const GAUGE_FLASH = 0.22;        // destello del anillo cerrado, en segundos
+// carga de salida al abrir el nivel 4, sobre 4: el anillo nace casi cerrado para
+// que el premio quede a un match de distancia y se vea para qué sirve. Un cuarteto
+// (0.55) lo cierra de una; a base de tríos (0.17) hacen falta tres.
+const GAUGE_INTRO = 3.6;
 const GAUGE_TRACK = "#2a2e4a";
 const GAUGE_FILL  = "#ffa06b";
 // alerta de muerte. No comparte familia ni con el gauge — que sería concéntrico
 // y naranja a la vez — ni con el rojo COL[0] que late detrás en el montón.
 const DANGER      = "#ff2d4a";
 
-// 4 colores base + morado, que entra más adelante en la partida
+// 4 colores base + morado, que entra con el nivel 5
 const COL = ["#e0392b","#f2c53d","#2f6fd0","#3aa655","#a259e0"];
-const PURPLE_START = 160;                   // segundo en que aparece el morado
 const WHITE = 8, STONE = 9;                // fuera del rango de índices de color
 const PAINT = { 8:"#eef0f6", 9:"#484c5c" };
-function numColors(){ return t > PURPLE_START ? 5 : 4; }
+function numColors(){ return level >= 5 ? 5 : 4; }
+
+// ─── niveles ───────────────────────────────────────────────────────────────
+// Un único array declarativo manda sobre tiempos, textos y gates: `t` es la
+// fuente de verdad y `level` es derivado. Ninguna mecánica conserva ya su propia
+// constante de tiempo —todas preguntan por el nivel—, así que mover un `at`
+// reordena la partida entera desde aquí. El último nivel es terminal.
+const LEVELS = [
+  { n:1, at:0,   tip:null },   // dinámico: depende del dispositivo, ver tipFor()
+  // INVARIANTE: at < STONE_TIME. La edad de una bola nunca supera `t`, así que
+  // mientras se cumpla es imposible que aparezca una piedra antes de explicarla
+  // y ageBubbles() no necesita preguntar por el nivel. Al subir este `at` por
+  // encima de 34 hay que devolverle allí la guarda.
+  { n:2, at:24,  tip:"Si tardas, la bola se vuelve piedra y ya no estalla. El anillo gris avisa." },
+  // el tutorial de las blancas llega con una blanca ya en camino: se lee el texto
+  // mirando la cosa de la que habla, no esperando 14 s a que aparezca sola.
+  { n:3, at:60,  on(){ spawnWhite(); whiteT = whiteInterval(); },
+                 tip:"Las bolas blancas estallan con cualquier match que las toque." },
+  // el anillo no existía hasta ahora, así que aparece de golpe y barriendo hasta
+  // GAUGE_INTRO: el tip habla de cerrarlo mientras se ve cerrarse casi entero.
+  { n:4, at:125, on(){ gauge = GAUGE_INTRO; },
+                 tip:"Cierra el anillo naranja: saldrá una bola que arrasa todo lo que encuentre a su paso." },
+  { n:5, at:170, tip:"Nuevo color: púrpura." },
+  { n:6, at:220, tip:"Cuidado con la sinusoide." },
+  { n:7, at:270, tip:"Nueva bola: rosa." },
+];
+// Intervalo entre blancas: se acorta con la partida, pero la rampa cuenta desde
+// que abrió el nivel 3, no desde t=0. En el propio instante de abrir vale
+// WHITE_INT_START, así que la blanca del tutorial deja el ciclo recién arrancado.
+function whiteInterval(){
+  return WHITE_INT_MIN + (WHITE_INT_START-WHITE_INT_MIN)*
+         Math.exp(-(t-LEVELS[2].at)/WHITE_INT_RAMP*1.6);
+}
+
+// el tip se lee, no se parpadea: la ventana sale del número de palabras.
+const READ_MIN = 3.5, READ_MAX = 9.0, READ_PER_WORD = 0.38, READ_BASE = 1.4;
+function readTime(tip){
+  const words = tip.replace(/<br>/g," ").trim().split(/\s+/).length;
+  return Math.max(READ_MIN, Math.min(READ_MAX, READ_BASE + READ_PER_WORD*words));
+}
+
+// El tip del nivel 1 es el único de dos líneas —objetivo y control— y el único
+// que se compone al vuelo: los primeros segundos son justo cuando el jugador
+// revela qué dispositivo usa, así que el modo arranca por matchMedia y lo fija
+// el primer gesto real. Si cambia con el tip a la vista se reescribe en vivo,
+// sin reiniciar ni el temporizador ni el fade.
+let inputMode = matchMedia("(pointer: fine)").matches ? "desktop" : "touch";
+let inputModeFixed = false;
+function tipFor(lv){
+  if (lv === 1)
+    return "Junta 3 o más del mismo color.<br>" + (inputMode === "desktop"
+      ? "Arrastra o ← → para girar. Clic o ↓ para soltar rápido."
+      : "Arrastra para girar. Toca para soltar rápido.");
+  return LEVELS[lv-1].tip;
+}
+function setInputMode(m){
+  if (inputModeFixed) return;
+  inputModeFixed = true;
+  if (m === inputMode) return;
+  inputMode = m;
+  if (level === 1 && tipT > 0) tipEl.innerHTML = tipFor(1);
+}
+const lvlNEl = document.querySelector(".lvl-n");
+const tipEl  = document.querySelector(".lvl-tip");
+function showLevel(){
+  lvlNEl.textContent = "NIVEL " + level;
+  tipEl.innerHTML = tipFor(level);
+  tipEl.classList.add("on");
+}
 
 // ─── estado ────────────────────────────────────────────────────────────────
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
 let grid, angle, angleT, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, nextSpawn, whiteT, lastColorAngle;
-let purpleShown, banner;
+let level, tipT;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
 let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
 let bestSaved;
@@ -161,7 +264,8 @@ function reset(){
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
   angle = angleT = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0; t = 0;
   spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; lastColorAngle = null;
-  purpleShown = false; banner = 0;
+  // el nivel 1 y su tip se pintan desde el frame cero
+  level = 1; tipT = readTime(tipFor(1)); showLevel();
   { const aArc = Math.random()*Math.PI*2;
     nextSpawn = { aArc, a: aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82,
                   k: Math.floor(Math.random()*4) }; }  // arranque: sin morado
@@ -201,11 +305,11 @@ function resize(){
   const NEED  = STAGE / STAGE_ASPECT;
   const slack = Math.max(0, H - NEED);
   let lift = Math.min(slack*LIFT_K, STAGE*LIFT_MAX);
-  // guarda: con el HUD abajo, arriba solo hay que respetar el borde. La zona de
-  // spawn y el aviso suben con la esfera y no deben salirse por él. Con
-  // LIFT_MAX=0.14 no llega a morder; si algún día se ocupa la franja superior,
-  // este es el sitio donde descontarla.
-  lift = Math.min(lift, Math.max(0, H/2 - PS*0.60 - PS*TOP_KEEP));
+  // guarda: la zona de spawn y el aviso suben con la esfera y no deben salirse
+  // por arriba. La franja superior ya no está libre —la ocupa la línea
+  // "NIVEL X"—, así que se descuenta también. Solo la línea permanente: el tip
+  // flota por encima y no reserva altura.
+  lift = Math.min(lift, Math.max(0, H/2 - PS*0.60 - PS*TOP_KEEP - PS*LVL_BAND));
 
   ox = W/2; oy = H/2 - lift;
 }
@@ -507,7 +611,9 @@ function commitFlash(){
       const pts = Math.round(n * 5 * scoreMultForSize(n) * cm);
       addFloater(comp, pts, tone, comboDepth>0 ? "x"+cm.toFixed(1).replace(/\.0$/,"")+" COMBO" : null);
       score += pts;
-      gauge = Math.min(4, gauge + gaugeForSize(n)*cm);
+      // los matches de los niveles 1-3 puntúan igual, pero no cargan nada: el
+      // anillo aparece a cero en el nivel 4, sin arrastre de lo anterior.
+      if (level >= 4) gauge = Math.min(4, gauge + gaugeForSize(n)*cm);
     }
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
   }
@@ -606,6 +712,14 @@ function easeVisual(dt){
 }
 
 // ─── petrificación y derrota ───────────────────────────────────────────────
+// El reloj de cada bola corre desde el primer segundo de partida, así el tutorial
+// del nivel 2 no llega a un tablero recién puesto a cero: al abrirse, las bolas
+// que el jugador no ha sabido limpiar ya están envejecidas, los avisos aparecen
+// de golpe sobre ellas y la primera piedra cae poco después. Se explica una
+// amenaza en curso, no una que empieza a contar en ese instante.
+// Aquí no hay guarda de nivel y no le hace falta: la invariante anotada en LEVELS
+// garantiza que ninguna edad alcance STONE_TIME antes de que abra el nivel 2. El
+// anillo de aviso sí se esconde, porque ese llega mucho antes que la piedra.
 function ageBubbles(dt){
   for (let i=0;i<N*N;i++){
     const g = grid[i];
@@ -699,6 +813,7 @@ cv.addEventListener("pointerdown", e=>{
   if (e.target.closest && e.target.closest(UI)) return;
   e.preventDefault();                                // sin arrastre fantasma del navegador
   prof = e.pointerType === "mouse" ? PROFILE.mouse : PROFILE.touch;
+  setInputMode(e.pointerType === "mouse" ? "desktop" : "touch");
   ptrId = e.pointerId;
   try { cv.setPointerCapture(e.pointerId); } catch(_){}
   ptrDown = true; dragAcc = 0; dir = 0; rotT = 0; energy = 0;
@@ -756,6 +871,7 @@ addEventListener("keydown", e=>{
   if (dead && (e.key===" "||e.key==="Enter")){ reset(); return; }
   if (KEY_DIRS[e.code] !== undefined){
     e.preventDefault();
+    setInputMode("desktop");
     if (e.repeat) return;                  // la repetición la conduce el juego, no el SO
     if (heldKeys.indexOf(e.code) < 0) heldKeys.push(e.code);
     recalcKeyDir();
@@ -765,7 +881,7 @@ addEventListener("keydown", e=>{
     rotate(keyDir); keyHoldT = 0; keyMode = "pending";
     return;
   }
-  if (e.key==="ArrowDown"||e.key==="s"){ e.preventDefault(); hardDrop(); }
+  if (e.key==="ArrowDown"||e.key==="s"){ e.preventDefault(); setInputMode("desktop"); hardDrop(); }
 });
 addEventListener("keyup", e=>{
   if (KEY_DIRS[e.code] === undefined) return;
@@ -821,6 +937,7 @@ function bubble(x,y,fill,rad,spec,alpha){
 // montón crecido las fichas exteriores lo tapan — se dibuja debajo de ellas.
 // No pulsa: es progreso, no alarma.
 function drawGauge(){
+  if (level < 4) return;    // antes del nivel 4 el anillo no existe: ni pista ni relleno
   cx.save();
   cx.lineCap = "butt";                 // corte recto: el arco acaba en radio, no en punta
   cx.lineWidth = PS*GAUGE_W;
@@ -926,9 +1043,11 @@ function draw(){
         cx.beginPath(); cx.arc(x,y,rad,0,7);
         cx.strokeStyle="rgba(120,120,140,.7)"; cx.lineWidth=1.5; cx.stroke();
       }
-      if (!fl && b.k!==WHITE && b.k!==STONE && b.age > STONE_WARN){
+      if (level >= 2 && !fl && b.k!==WHITE && b.k!==STONE && b.age > STONE_WARN){
         // aviso: anillo gris que engorda. Empieza lento y discreto, y solo
         // acelera al acercarse la petrificación: urgencia, no ansiedad constante.
+        // El nivel 1 lo esconde aunque la edad ya corra: nada se muestra antes
+        // de su nivel, y el aviso es justo lo que el tip del nivel 2 nombra.
         const p = (b.age-STONE_WARN)/(STONE_TIME-STONE_WARN);
         const freq  = 1.8 + 11*p*p;
         const pulse = (0.30 + 0.55*p) * (0.62 + 0.38*Math.abs(Math.sin(b.age*freq)));
@@ -968,22 +1087,6 @@ function draw(){
     }
   }
   drawFloaters();
-
-  // banner de aviso del nuevo color
-  if (banner > 0){
-    const a = Math.min(1, banner/0.5) * Math.min(1, (2.6-banner)/0.25);
-    cx.save();
-    cx.globalAlpha = a;
-    cx.font = `700 ${Math.round(PS*0.055)}px ui-monospace, Menlo, Consolas, monospace`;
-    cx.textAlign = "center"; cx.textBaseline = "middle";
-    cx.lineWidth = PS*0.010; cx.strokeStyle = "rgba(4,4,12,.9)";
-    cx.strokeText("NUEVO COLOR", ox, oy - PS*0.30);
-    cx.fillStyle = COL[4];
-    cx.fillText("NUEVO COLOR", ox, oy - PS*0.30);
-    cx.beginPath(); cx.arc(ox, oy - PS*0.22, PS*0.028, 0, 7);
-    cx.fillStyle = COL[4]; cx.fill();
-    cx.restore();
-  }
 }
 function mix(a,b,p){
   const h=s=>[1,3,5].map(i=>parseInt(s.substr(i,2),16));
@@ -998,6 +1101,19 @@ function frame(now){
 
   if (!dead){
     t += dt;
+    // progresión: `t` manda y `level` se deriva. El último nivel es terminal.
+    if (level < LEVELS.length && t >= LEVELS[level].at){
+      const entering = LEVELS[level];    // 0-indexado: la entrada del nivel que abre
+      level++;
+      tipT = readTime(tipFor(level));
+      showLevel();
+      if (entering.on) entering.on();    // puesta en escena del nivel, si la tiene
+    }
+    if (tipT > 0){
+      tipT -= dt;
+      // el fade-out ocurre DESPUÉS de agotar la ventana de lectura, no dentro
+      if (tipT <= 0) tipEl.classList.remove("on");
+    }
     // teclado: DAS, rampa continua y decaimiento de la rampa al soltar
     if (keyMode === "pending"){
       keyHoldT += dt;
@@ -1028,16 +1144,10 @@ function frame(now){
       spawnT = SPAWN_MIN + (SPAWN_START-SPAWN_MIN)*Math.exp(-t/SPAWN_RAMP*1.6);
     }
     // ciclo propio de las blancas, ajeno al de las fichas de color
-    if (t > WHITE_START){
+    if (level >= 3){
       whiteT -= dt;
-      if (whiteT <= 0){
-        spawnWhite();
-        whiteT = WHITE_INT_MIN + (WHITE_INT_START-WHITE_INT_MIN)*
-                 Math.exp(-(t-WHITE_START)/WHITE_INT_RAMP*1.6);
-      }
+      if (whiteT <= 0){ spawnWhite(); whiteT = whiteInterval(); }
     }
-    // aviso único de la entrada del morado
-    if (!purpleShown && t > PURPLE_START){ purpleShown = true; banner = 2.6; }
 
     // el anillo persigue al valor lógico: commitFlash() suma de golpe, y un salto
     // instantáneo de 60° es un parpadeo, no una recompensa.
@@ -1045,7 +1155,7 @@ function frame(now){
     if (gaugeFlashT > 0) gaugeFlashT -= dt;
     // el bonus espera a que el arco haya cerrado el anillo, no a que el contador
     // llegue a 4: disparar con gaugeV a medias rompe la relación que busca el aro.
-    if (gauge >= 4 && gaugeV >= 3.97){
+    if (level >= 4 && gauge >= 4 && gaugeV >= 3.97){
       gaugeFlashT = GAUGE_FLASH;
       spawnBonus(4);
       gauge = 0;                 // gaugeV baja sola: el anillo se vacía barriendo
@@ -1055,7 +1165,6 @@ function frame(now){
     ageBubbles(dt);
     checkDead();
   }
-  if (banner > 0) banner -= dt;
   stepFlash(dt);
   easeVisual(dt);
   stepFloaters(dt);
