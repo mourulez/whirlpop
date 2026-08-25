@@ -165,30 +165,47 @@ const COL = ["#e0392b","#f2c53d","#2f6fd0","#3aa655","#a259e0"];
 const WHITE = 8, STONE = 9;                // fuera del rango de índices de color
 const PAINT = { 8:"#eef0f6", 9:"#484c5c" };
 function numColors(){ return level >= 5 ? 5 : 4; }
+// El sistema de carga es la única mecánica que puede adelantarse al calendario:
+// con su tutorial ya leído tres veces está disponible desde el frame cero. El
+// resto de elementos conserva su reloj y solo pierde el tip. `gaugeEarly` se
+// congela en reset(), así que el desbloqueo nunca entra a mitad de partida.
+function gaugeOn(){ return level >= 4 || gaugeEarly; }
 
 // ─── niveles ───────────────────────────────────────────────────────────────
 // Un único array declarativo manda sobre tiempos, textos y gates: `t` es la
 // fuente de verdad y `level` es derivado. Ninguna mecánica conserva ya su propia
 // constante de tiempo —todas preguntan por el nivel—, así que mover un `at`
 // reordena la partida entera desde aquí. El último nivel es terminal.
+// `id` es la identidad estable de cada mecánica y no depende de la posición: el
+// almacén guarda los contadores de tutorial por `id`, así que reordenar niveles
+// moviendo un `at` no reasigna progresos a la mecánica equivocada.
 const LEVELS = [
-  { n:1, at:0,   tip:null },   // dinámico: depende del dispositivo, ver tipFor()
+  { n:1, id:"ctrl",   at:0,   tip:null },   // dinámico: depende del dispositivo, ver tipFor()
   // INVARIANTE: at < STONE_TIME. La edad de una bola nunca supera `t`, así que
   // mientras se cumpla es imposible que aparezca una piedra antes de explicarla
   // y ageBubbles() no necesita preguntar por el nivel. Al subir este `at` por
   // encima de 34 hay que devolverle allí la guarda.
-  { n:2, at:19,  tip:"Si tardas, la bola se vuelve piedra y ya no estalla. El anillo gris avisa." },
+  { n:2, id:"stone",  at:19,  tip:"Si tardas, la bola se vuelve piedra y ya no estalla. El anillo gris avisa." },
   // el tutorial de las blancas llega con una blanca ya en camino: se lee el texto
   // mirando la cosa de la que habla, no esperando 14 s a que aparezca sola.
-  { n:3, at:50,  on(){ spawnWhite(); whiteT = whiteInterval(); },
-                 tip:"Las bolas blancas estallan con cualquier match que las toque." },
-  // el anillo no existía hasta ahora, así que aparece de golpe y barriendo hasta
-  // GAUGE_INTRO: el tip habla de cerrarlo mientras se ve cerrarse casi entero.
-  { n:4, at:90,  on(){ gauge = GAUGE_INTRO; },
-                 tip:"Cierra el anillo naranja: saldrá una bola que arrasa todo lo que encuentre a su paso." },
-  { n:5, at:130, tip:"Nuevo color: púrpura." },
-  { n:6, at:175, tip:"Cuidado con la sinusoide." },
-  { n:7, at:220, tip:"Nueva bola: rosa." },
+  { n:3, id:"white",  at:50,  on(){ spawnWhite(); whiteT = whiteInterval(); },
+                      tip:"Las bolas blancas estallan con cualquier match que las toque." },
+  // Puesta en escena, no mecánica: el anillo aparece de golpe y barriendo hasta
+  // GAUGE_INTRO, y el tip habla de cerrarlo mientras se ve cerrarse casi entero.
+  // Va en `intro` y no en `on` porque quien ya se sabe el anillo lo tiene desde
+  // el frame cero (ver gaugeOn()): ese salto sería un bonus regalado a mitad de
+  // partida y sin texto que lo justifique.
+  { n:4, id:"gauge",  at:90,  intro(){ gauge = GAUGE_INTRO; },
+                      tip:"Cierra el anillo naranja: saldrá una bola que arrasa todo lo que encuentre a su paso." },
+  // El púrpura no puede esperar al azar: con 5 colores en la bolsa podría tardar
+  // varias fichas en salir y el tip se leería sin nada que mirar. `forceK` reserva
+  // el color de la próxima ficha, y si el aviso de la pendiente todavía no ha
+  // empezado a pintarse se la vuelve a tirar a ella —recolorear un arco a medio
+  // aparecer sería un parpadeo— para que el púrpura salga ya.
+  { n:5, id:"purple", at:130, on(){ forceK = 4; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
+                      tip:"Nuevo color: púrpura." },
+  { n:6, id:"sine",   at:175, tip:"Cuidado con la sinusoide." },
+  { n:7, id:"pink",   at:220, tip:"Nueva bola: rosa." },
 ];
 // Intervalo entre blancas: se acorta con la partida, pero la rampa cuenta desde
 // que abrió el nivel 3, no desde t=0. En el propio instante de abrir vale
@@ -228,9 +245,15 @@ function setInputMode(m){
 }
 const lvlNEl = document.querySelector(".lvl-n");
 const tipEl  = document.querySelector(".lvl-tip");
+// Único punto donde se decide si hay tip: tras tres lecturas completas el nivel
+// abre con el número a secas. Con tipT a 0 el bloque de fade de frame() no tiene
+// nada que hacer y setInputMode() tampoco reescribe nada —cae solo.
 function showLevel(){
   lvlNEl.textContent = "NIVEL " + level;
-  tipEl.innerHTML = tipFor(level);
+  if (tutSeen(LEVELS[level-1].id)){ tipT = 0; tipEl.classList.remove("on"); return; }
+  const tip = tipFor(level);
+  tipT = readTime(tip);
+  tipEl.innerHTML = tip;
   tipEl.classList.add("on");
 }
 
@@ -238,18 +261,98 @@ function showLevel(){
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
 let grid, angle, angleT, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, nextSpawn, whiteT, lastColorAngle;
-let level, tipT;
+let level, tipT, gaugeEarly, forceK;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
 let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
 let bestSaved;
 
-// PERSONAL BEST. localStorage lanza en Safari privado y puede estar bloqueado
-// dentro del iframe de un portal, así que las dos caras van envueltas; una
-// lectura fallida vale 0.
-const BEST_KEY = "whirlpop.best";
-function readBest(){ try { return parseInt(localStorage.getItem(BEST_KEY),10) || 0; } catch(_){ return 0; } }
-function writeBest(v){ try { localStorage.setItem(BEST_KEY, String(v)); } catch(_){} }
-let bestScore = readBest();
+// ─── almacén local ─────────────────────────────────────────────────────────
+// Una sola clave versionada con el récord y los contadores de tutorial. El objeto
+// en memoria es la fuente de verdad durante la sesión y localStorage solo el
+// respaldo: lanza en Safari privado y puede estar bloqueado dentro del iframe de
+// un portal, así que las dos caras van envueltas y el fallo se traga en silencio.
+// Sin aviso al jugador: no puede hacer nada al respecto y la partida se juega
+// igual, sin persistencia, hasta que se recarga.
+// El almacén es por origen, navegador y dispositivo, y no se sincroniza: móvil y
+// escritorio son dos progresos independientes que nunca se ven. Aceptado, no
+// defecto —quien prueba la demo en los dos ve los tutoriales en los dos.
+const SAVE_KEY = "whirlpop.save";
+const BEST_KEY = "whirlpop.best";      // clave heredada: solo guardaba el récord
+const SAVE_V = 1, TUT_MAX = 3;
+const TUT_IDS = LEVELS.map(l => l.id);
+
+function lsGet(k){ try { return localStorage.getItem(k); } catch(_){ return null; } }
+function lsSet(k,v){ try { localStorage.setItem(k,v); } catch(_){} }
+function lsDel(k){ try { localStorage.removeItem(k); } catch(_){} }
+
+// nada de lo que salga del almacén puede romper el arranque: un valor editado a
+// mano en devtools se satura o cae a 0, y un id desconocido no llega a entrar.
+function clampInt(x, max){ return Math.max(0, Math.min(max, Math.floor(Number(x) || 0))); }
+function blankSave(){
+  const s = { v:SAVE_V, best:0, tut:{} };
+  for (const id of TUT_IDS) s.tut[id] = 0;
+  return s;
+}
+let save = blankSave(), saveDirty = false;
+
+function loadSave(){
+  save = blankSave();
+  let raw = null;
+  try { raw = JSON.parse(lsGet(SAVE_KEY)); } catch(_){}
+  if (raw && raw.v === SAVE_V){
+    save.best = clampInt(raw.best, Infinity);
+    const tut = raw.tut || {};
+    for (const id of TUT_IDS) save.tut[id] = clampInt(tut[id], TUT_MAX);
+    return;
+  }
+  // sin clave, con otra versión o con el JSON roto: partida limpia. Se rescata el
+  // récord de la clave heredada y se borra, para no dejar dos fuentes de verdad.
+  save.best = clampInt(lsGet(BEST_KEY), Infinity);
+  flushSave();
+  lsDel(BEST_KEY);
+}
+// se escribe siempre la clave entera: el blob son decenas de bytes y no compensa
+// nada más fino. Nunca dentro del bucle de frame.
+function flushSave(){ saveDirty = false; lsSet(SAVE_KEY, JSON.stringify(save)); }
+function flushIfDirty(){ if (saveDirty) flushSave(); }
+
+function tutCount(id){ return save.tut[id] || 0; }
+function tutSeen(id){ return tutCount(id) >= TUT_MAX; }
+function tutConsume(id){
+  if (!(id in save.tut) || save.tut[id] >= TUT_MAX) return;
+  save.tut[id]++;
+  flushSave();          // el instante importa: no depende de llegar al game over
+}
+
+// El récord se perdía al cerrar la pestaña en pleno récord, que en móvil —que es
+// donde se juega— pasa constantemente. Los dos eventos porque ninguno dispara de
+// forma fiable en todos los navegadores; entre los dos cubren cerrar la pestaña,
+// cambiar de app en iOS y el bfcache. loseInput() no escribe: ya corre en blur y
+// mezclar responsabilidades ahí complica el rastreo.
+addEventListener("pagehide", flushIfDirty);
+document.addEventListener("visibilitychange", ()=>{ if (document.hidden) flushIfDirty(); });
+
+// Arranque del almacén con los dos atajos de prueba encima: ?reset=1 borra y
+// empieza limpio, ?tut=3 pone todos los contadores a 3 —sin tutoriales y con la
+// carga desbloqueada—. Se quitan de la URL para que un F5 no los repita: jugar
+// seis minutos, o borrar la clave a mano en el móvil —donde eso exige depuración
+// remota—, no es forma de probar esto.
+(function bootSave(){
+  const q = new URLSearchParams(location.search);
+  const wipe = q.has("reset"), tut = q.get("tut");
+  if (wipe){ lsDel(SAVE_KEY); lsDel(BEST_KEY); }
+  loadSave();
+  if (tut !== null){
+    for (const id of TUT_IDS) save.tut[id] = clampInt(tut, TUT_MAX);
+    flushSave();
+  }
+  if (!wipe && tut === null) return;
+  q.delete("reset"); q.delete("tut");
+  const qs = q.toString();
+  try { history.replaceState(null, "", location.pathname + (qs ? "?"+qs : "") + location.hash); } catch(_){}
+})();
+
+let bestScore = save.best;
 const bestEl = document.getElementById("bestv");
 
 function idx(c,r){ return r*N+c; }
@@ -264,8 +367,13 @@ function reset(){
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
   angle = angleT = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0; t = 0;
   spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; lastColorAngle = null;
+  forceK = null;
+  // el desbloqueo del anillo se congela aquí: si el tutorial de la carga se
+  // consume por tercera vez en esta partida, el adelanto entra en la siguiente.
+  // Cambiar las reglas en caliente, a mitad de partida, sería peor.
+  gaugeEarly = tutSeen("gauge");
   // el nivel 1 y su tip se pintan desde el frame cero
-  level = 1; tipT = readTime(tipFor(1)); showLevel();
+  level = 1; showLevel();
   { const aArc = Math.random()*Math.PI*2;
     nextSpawn = { aArc, a: aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82,
                   k: Math.floor(Math.random()*4) }; }  // arranque: sin morado
@@ -334,7 +442,10 @@ const NB = [[0,-1],[0,1],[-1,0],[1,0]];   // adyacencia 4, sin diagonales
 // El arco marca la ZONA; el ángulo real cae en algún punto dentro de ella.
 // Las blancas NO pasan por aquí: tienen su propio ciclo y no se avisan.
 function pickNext(){
-  const k = Math.floor(Math.random()*numColors());
+  // un nivel puede reservar el color de la siguiente ficha (ver LEVELS): es un
+  // disparo único y el azar recupera el mando en la ficha de después.
+  const k = forceK !== null ? forceK : Math.floor(Math.random()*numColors());
+  forceK = null;
   const aArc = Math.random()*Math.PI*2;
   const a = aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82;   // dentro del arco
   return { aArc, a, k };
@@ -611,9 +722,9 @@ function commitFlash(){
       const pts = Math.round(n * 5 * scoreMultForSize(n) * cm);
       addFloater(comp, pts, tone, comboDepth>0 ? "x"+cm.toFixed(1).replace(/\.0$/,"")+" COMBO" : null);
       score += pts;
-      // los matches de los niveles 1-3 puntúan igual, pero no cargan nada: el
-      // anillo aparece a cero en el nivel 4, sin arrastre de lo anterior.
-      if (level >= 4) gauge = Math.min(4, gauge + gaugeForSize(n)*cm);
+      // sin carga disponible los matches puntúan igual pero no cargan nada: el
+      // anillo aparece a cero cuando abre, sin arrastre de lo anterior.
+      if (gaugeOn()) gauge = Math.min(4, gauge + gaugeForSize(n)*cm);
     }
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
   }
@@ -937,7 +1048,7 @@ function bubble(x,y,fill,rad,spec,alpha){
 // montón crecido las fichas exteriores lo tapan — se dibuja debajo de ellas.
 // No pulsa: es progreso, no alarma.
 function drawGauge(){
-  if (level < 4) return;    // antes del nivel 4 el anillo no existe: ni pista ni relleno
+  if (!gaugeOn()) return;   // sin carga disponible el anillo no existe: ni pista ni relleno
   cx.save();
   cx.lineCap = "butt";                 // corte recto: el arco acaba en radio, no en punta
   cx.lineWidth = PS*GAUGE_W;
@@ -1105,14 +1216,21 @@ function frame(now){
     if (level < LEVELS.length && t >= LEVELS[level].at){
       const entering = LEVELS[level];    // 0-indexado: la entrada del nivel que abre
       level++;
-      tipT = readTime(tipFor(level));
-      showLevel();
-      if (entering.on) entering.on();    // puesta en escena del nivel, si la tiene
+      showLevel();                       // fija tipT, o lo deja a 0 si el tip ya está visto
+      if (entering.on) entering.on();    // mecánica del nivel: corre siempre
+      // la puesta en escena acompaña al texto: sin tip que leer no pinta nada
+      if (entering.intro && tipT > 0) entering.intro();
     }
     if (tipT > 0){
       tipT -= dt;
       // el fade-out ocurre DESPUÉS de agotar la ventana de lectura, no dentro
-      if (tipT <= 0) tipEl.classList.remove("on");
+      if (tipT <= 0){
+        tipEl.classList.remove("on");
+        // Único punto de consumo del tutorial: la ventana se ha agotado entera y
+        // dentro de la partida. Morir con el tip a la vista no cuenta —con `dead`
+        // esto no corre— y no hay forma de sumar dos veces el mismo nivel.
+        tutConsume(LEVELS[level-1].id);
+      }
     }
     // teclado: DAS, rampa continua y decaimiento de la rampa al soltar
     if (keyMode === "pending"){
@@ -1155,7 +1273,7 @@ function frame(now){
     if (gaugeFlashT > 0) gaugeFlashT -= dt;
     // el bonus espera a que el arco haya cerrado el anillo, no a que el contador
     // llegue a 4: disparar con gaugeV a medias rompe la relación que busca el aro.
-    if (level >= 4 && gauge >= 4 && gaugeV >= 3.97){
+    if (gaugeOn() && gauge >= 4 && gaugeV >= 3.97){
       gaugeFlashT = GAUGE_FLASH;
       spawnBonus(4);
       gauge = 0;                 // gaugeV baja sola: el anillo se vacía barriendo
@@ -1173,10 +1291,10 @@ function frame(now){
   document.getElementById("score").textContent = score;
   // el récord se mueve durante la partida, en espejo con el marcador de arriba:
   // superarlo es un momento de juego, no un dato de menú.
-  if (score > bestScore) bestScore = score;
+  if (score > bestScore){ bestScore = score; save.best = bestScore; saveDirty = true; }
   bestEl.textContent = bestScore;
   if (dead){
-    if (!bestSaved){ bestSaved = true; writeBest(bestScore); }
+    if (!bestSaved){ bestSaved = true; flushIfDirty(); }
     document.getElementById("over").style.display="flex";
     document.getElementById("fin").textContent = score+" puntos";
   }
