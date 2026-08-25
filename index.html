@@ -177,18 +177,18 @@ const LEVELS = [
   // mientras se cumpla es imposible que aparezca una piedra antes de explicarla
   // y ageBubbles() no necesita preguntar por el nivel. Al subir este `at` por
   // encima de 34 hay que devolverle allí la guarda.
-  { n:2, at:24,  tip:"Si tardas, la bola se vuelve piedra y ya no estalla. El anillo gris avisa." },
+  { n:2, at:19,  tip:"Si tardas, la bola se vuelve piedra y ya no estalla. El anillo gris avisa." },
   // el tutorial de las blancas llega con una blanca ya en camino: se lee el texto
   // mirando la cosa de la que habla, no esperando 14 s a que aparezca sola.
-  { n:3, at:60,  on(){ spawnWhite(); whiteT = whiteInterval(); },
+  { n:3, at:50,  on(){ spawnWhite(); whiteT = whiteInterval(); },
                  tip:"Las bolas blancas estallan con cualquier match que las toque." },
   // el anillo no existía hasta ahora, así que aparece de golpe y barriendo hasta
   // GAUGE_INTRO: el tip habla de cerrarlo mientras se ve cerrarse casi entero.
-  { n:4, at:125, on(){ gauge = GAUGE_INTRO; },
+  { n:4, at:90,  on(){ gauge = GAUGE_INTRO; },
                  tip:"Cierra el anillo naranja: saldrá una bola que arrasa todo lo que encuentre a su paso." },
-  { n:5, at:170, tip:"Nuevo color: púrpura." },
-  { n:6, at:220, tip:"Cuidado con la sinusoide." },
-  { n:7, at:270, tip:"Nueva bola: rosa." },
+  { n:5, at:130, tip:"Nuevo color: púrpura." },
+  { n:6, at:175, tip:"Cuidado con la sinusoide." },
+  { n:7, at:220, tip:"Nueva bola: rosa." },
 ];
 // Intervalo entre blancas: se acorta con la partida, pero la rampa cuenta desde
 // que abrió el nivel 3, no desde t=0. En el propio instante de abrir vale
