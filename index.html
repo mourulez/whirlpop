@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Whirlpop</title>
 <meta name="description" content="Whirlpop — juego arcade de piezas que caen sobre un tablero que gira.">
 <meta name="theme-color" content="#06060c">
@@ -25,30 +25,35 @@
               user-select:none; -webkit-user-select:none;
               font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
   #c { display:block; width:100%; height:100%; touch-action:none; }
-  #hud { position:fixed; top:calc(var(--u)*2); left:50%; transform:translateX(-50%);
-         width:var(--stage); display:flex; justify-content:center;
-         gap:calc(var(--u)*3.6); align-items:center; pointer-events:none; color:#cfd2e6;
-         font-size:max(12px, calc(var(--u)*3.05)); letter-spacing:1px; }
-  #gauge { display:flex; gap:calc(var(--u)*0.8); }
-  .seg { width:calc(var(--u)*5.3); height:calc(var(--u)*2.25);
-         border:max(1px, calc(var(--u)*0.3)) solid #6f74a8; border-radius:2px; }
-  .seg.on { background:#f26b3a; border-color:#f26b3a; }
+  /* HUD: pertenece a la columna, se reparte sobre --stage y escala con --u.
+     Los dos marcadores viven abajo, en fila y con la misma composición —etiqueta
+     encima, número debajo—, dejando toda la mitad superior libre.
+     pointer-events:none es crítico: el HUD cae justo donde el pulgar empieza el
+     arrastre y si captura el gesto, el giro se pierde. */
+  #hud { position:fixed; left:50%; transform:translateX(-50%); width:var(--stage);
+         bottom:max(calc(var(--u)*3), env(safe-area-inset-bottom));
+         display:flex; justify-content:space-around; align-items:flex-start;
+         pointer-events:none; }
+  .hblock { display:flex; flex-direction:column; align-items:center; }
+  .hlabel { font-size:max(9.5px, calc(var(--u)*2.25)); letter-spacing:2px;
+            line-height:1.3; color:#5c6090; }
+  .hval   { font-size:max(22px, calc(var(--u)*6.2)); letter-spacing:1px;
+            line-height:1.3; color:#cfd2e6; }
   .btn { min-width:132px; padding:0 16px; height:52px; border:1.5px solid #4a4f7a;
          border-radius:8px; background:rgba(30,34,60,.55); color:#cfd2e6; font-size:15px;
          letter-spacing:2px; font-family:inherit; display:flex; align-items:center;
          justify-content:center; user-select:none; cursor:pointer; }
-  #fs { position:fixed; top:calc(var(--u)*1.6);
-        right:calc(50% - var(--stage)/2 + var(--u)*2);
+  /* chrome, no HUD: se ancla a la esquina física de la pantalla, no a la
+     columna. Anclado a la columna, en landscape --stage se estrecha y el botón
+     acaba flotando en mitad del viewport. */
+  #fs { position:fixed; top:max(calc(var(--u)*1.6), env(safe-area-inset-top));
+        right:max(calc(var(--u)*2), env(safe-area-inset-right));
         width:max(34px, calc(var(--u)*7.7)); height:max(34px, calc(var(--u)*7.7));
         display:flex; align-items:center; justify-content:center; border:1.5px solid #3a3f68;
         border-radius:7px; background:rgba(30,34,60,.5); color:#9aa0cc;
         font-size:max(15px, calc(var(--u)*3.4));
         cursor:pointer; user-select:none; z-index:5; }
   #fs:active { background:rgba(70,80,140,.75); }
-  #hint { position:fixed; bottom:calc(var(--u)*4); left:50%; transform:translateX(-50%);
-          width:var(--stage); padding:0 calc(var(--u)*3); text-align:center;
-          font-size:max(9.5px, calc(var(--u)*2.25)); line-height:1.55; text-wrap:balance;
-          letter-spacing:1px; color:#5c6090; pointer-events:none; }
   .btn:active { background:rgba(70,80,140,.75); }
   .btn.arm { border-color:#f26b3a; color:#f26b3a; }
   #over { position:fixed; inset:0; display:none; flex-direction:column; gap:calc(var(--u)*2);
@@ -61,9 +66,11 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hud"><span id="score">0</span><div id="gauge"></div></div>
+<div id="hud">
+  <div class="hblock"><span class="hlabel">SCORE</span><span class="hval" id="score">0</span></div>
+  <div class="hblock"><span class="hlabel">PERSONAL BEST</span><span class="hval" id="bestv">0</span></div>
+</div>
 <div id="fs">⛶</div>
-<div id="hint">arrastra para girar · mantén para seguir · toca para hard drop · el bonus sale solo</div>
 <div id="over"><b>GAME OVER</b><span id="fin">0</span><small>toca para reiniciar</small></div>
 
 <script>
@@ -93,6 +100,30 @@ const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
 const TELEGRAPH = 1.25;                     // aviso previo a la salida de cada ficha
 const TELEGRAPH_ARC = 35 * Math.PI/180;     // amplitud del aviso
 
+// elevación de la esfera: sale de la holgura vertical, sin media queries
+const LIFT_K   = 0.5;      // fracción de la altura sobrante que se consume
+const LIFT_MAX = 0.14;     // tope duro en fracción de STAGE — calibrar en dispositivo
+const TOP_KEEP = 0.09;     // aire mínimo sobre la zona de juego, múltiplo de PS
+
+// Los tres anillos concéntricos —gauge, frontera y aviso de salida— forman una
+// sola familia: cada uno hacia fuera es 1.5x el anterior, y el aire entre trazos
+// contiguos es el mismo en los dos saltos. Los radios del gauge y del aviso se
+// derivan de ese aire en resize(), no se escriben a mano, para que la relación
+// aguante al calibrar cualquiera de los tres grosores.
+const RING_GAP    = 0.0085;      // aire entre trazos contiguos, múltiplo de PS
+const GAUGE_W     = 0.008;       // trazo del gauge
+const BORDER_W    = 0.012;       // frontera = GAUGE_W * 1.5
+const TELE_W      = 0.018;       // aviso    = BORDER_W * 1.5
+const TELE_HALO_W = 0.085;       // resplandor del aviso: fuera de la progresión
+const GAUGE_A0    = Math.PI;     // ancla: 9 en punto
+const GAUGE_TWEEN = 11;          // seguimiento del valor visual hacia el lógico
+const GAUGE_FLASH = 0.22;        // destello del anillo cerrado, en segundos
+const GAUGE_TRACK = "#2a2e4a";
+const GAUGE_FILL  = "#ffa06b";
+// alerta de muerte. No comparte familia ni con el gauge — que sería concéntrico
+// y naranja a la vez — ni con el rojo COL[0] que late detrás en el montón.
+const DANGER      = "#ff2d4a";
+
 // 4 colores base + morado, que entra más adelante en la partida
 const COL = ["#e0392b","#f2c53d","#2f6fd0","#3aa655","#a259e0"];
 const PURPLE_START = 160;                   // segundo en que aparece el morado
@@ -102,11 +133,21 @@ function numColors(){ return t > PURPLE_START ? 5 : 4; }
 
 // ─── estado ────────────────────────────────────────────────────────────────
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
-let W,H,STAGE,PS,R,CELL,ox,oy;
-let grid, angle, angleT, flying, score, gauge, t, spawnT, dead, nextSpawn, whiteT, lastColorAngle;
+let W,H,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
+let grid, angle, angleT, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, nextSpawn, whiteT, lastColorAngle;
 let purpleShown, banner;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
 let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
+let bestSaved;
+
+// PERSONAL BEST. localStorage lanza en Safari privado y puede estar bloqueado
+// dentro del iframe de un portal, así que las dos caras van envueltas; una
+// lectura fallida vale 0.
+const BEST_KEY = "whirlpop.best";
+function readBest(){ try { return parseInt(localStorage.getItem(BEST_KEY),10) || 0; } catch(_){ return 0; } }
+function writeBest(v){ try { localStorage.setItem(BEST_KEY, String(v)); } catch(_){} }
+let bestScore = readBest();
+const bestEl = document.getElementById("bestv");
 
 function idx(c,r){ return r*N+c; }
 function inb(c,r){ return c>=0&&c<N&&r>=0&&r<N; }
@@ -118,7 +159,7 @@ function reset(){
   floaters = [];
   flashT = 0; flashSet = new Set(); flashBonus = false;
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
-  angle = angleT = 0; flying = []; score = 0; gauge = 0; t = 0;
+  angle = angleT = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0; t = 0;
   spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; lastColorAngle = null;
   purpleShown = false; banner = 0;
   { const aArc = Math.random()*Math.PI*2;
@@ -127,6 +168,7 @@ function reset(){
   dir = 0; rotT = 0; dragAcc = 0;
   ptrDown = false; ptrId = null; ptrX = 0; energy = 0; lastMoveT = 0; ptrT = 0; ptrMoved = false;
   heldKeys = []; keyDir = 0; keyMode = "idle"; keyHoldT = 0; keyRamp = 0; keyIdleT = 0;
+  bestSaved = false;
   document.getElementById("over").style.display = "none";
 }
 
@@ -146,7 +188,26 @@ function resize(){
   // el canvas ocupa la ventana entera — solo el fondo se expande a lo ancho —,
   // pero el juego mide la columna, no el viewport.
   PS = STAGE; R = PS*R_FACTOR; CELL = R*2/N;
-  ox = W/2; oy = H/2;
+  // la frontera manda: los otros dos anillos se sitúan a RING_GAP de su trazo.
+  // Del aviso se guarda el borde INTERIOR, porque su grosor late con la cuenta
+  // atrás y el aire debe ser el mismo en todo el latido, no solo en el pico.
+  gaugeRad  = R - PS*(BORDER_W/2 + RING_GAP + GAUGE_W/2);
+  teleRadIn = R + PS*(BORDER_W/2 + RING_GAP);
+
+  // En móvil vertical los dedos tapan justo la zona por la que entran las fichas.
+  // La corrección no mira al dispositivo, mira a la holgura: donde la columna
+  // está limitada por la altura no sobra nada y la esfera se queda centrada;
+  // donde lo está por el ancho, sobra altura y la esfera sube hasta el tope.
+  const NEED  = STAGE / STAGE_ASPECT;
+  const slack = Math.max(0, H - NEED);
+  let lift = Math.min(slack*LIFT_K, STAGE*LIFT_MAX);
+  // guarda: con el HUD abajo, arriba solo hay que respetar el borde. La zona de
+  // spawn y el aviso suben con la esfera y no deben salirse por él. Con
+  // LIFT_MAX=0.14 no llega a morder; si algún día se ocupa la franja superior,
+  // este es el sitio donde descontarla.
+  lift = Math.min(lift, Math.max(0, H/2 - PS*0.60 - PS*TOP_KEEP));
+
+  ox = W/2; oy = H/2 - lift;
 }
 addEventListener("resize", resize);
 // en móvil el alto real llega tarde al girar el dispositivo
@@ -195,8 +256,10 @@ function spawnWhite(){
                 ux:-Math.cos(a), uy:-Math.sin(a), sp:PS*WHITE_SPEED,
                 acc:WHITE_ACCEL });
 }
+// sale por el punto de anclaje del anillo, donde el arco acaba de cerrarse:
+// el medidor y su premio comparten sitio, no solo momento.
 function spawnBonus(lvl){
-  const a = Math.random()*Math.PI*2;
+  const a = GAUGE_A0;
   flying.push({ bonus:true, lvl, th:a, r:PS*0.50,
                 dir: Math.random()<0.5?1:-1, trail:[],
                 x:ox+Math.cos(a)*PS*0.50, y:oy+Math.sin(a)*PS*0.50 });
@@ -606,16 +669,6 @@ function holdRate(){ return lerp(prof.HOLD_SLOW, prof.HOLD_FAST, energy); }
 
 const UI = "#fs, #over";
 
-// el hint de hoy es literalmente falso con ratón: se reescribe con el input real.
-const HINT_TOUCH = "arrastra para girar · mantén para seguir · toca para hard drop · el bonus sale solo";
-const HINT_MOUSE = "arrastra con el botón izquierdo para girar · mantén para seguir · clic para hard drop · flechas para ajuste fino · el bonus sale solo";
-const hintEl = document.getElementById("hint");
-// único uso de media queries de input en todo el juego, y solo para el texto inicial
-hintEl.textContent = matchMedia("(pointer: fine)").matches ? HINT_MOUSE : HINT_TOUCH;
-function setHint(pointerType){
-  hintEl.textContent = pointerType === "mouse" ? HINT_MOUSE : HINT_TOUCH;
-}
-
 // Modelo: el dedo manda.
 //  - dedo levantado      -> no gira
 //  - arrastrando         -> gira en la dirección del arrastre, a su ritmo
@@ -646,7 +699,6 @@ cv.addEventListener("pointerdown", e=>{
   if (e.target.closest && e.target.closest(UI)) return;
   e.preventDefault();                                // sin arrastre fantasma del navegador
   prof = e.pointerType === "mouse" ? PROFILE.mouse : PROFILE.touch;
-  setHint(e.pointerType);
   ptrId = e.pointerId;
   try { cv.setPointerCapture(e.pointerId); } catch(_){}
   ptrDown = true; dragAcc = 0; dir = 0; rotT = 0; energy = 0;
@@ -762,6 +814,34 @@ function bubble(x,y,fill,rad,spec,alpha){
   cx.globalAlpha = 1;
 }
 
+// Anillo de carga. Por fuera no cabía a lo ancho: R*1.25 = PS*0.575 contra un
+// medio ancho de PS*0.5 en portrait, con el anclaje de las 9 fuera de pantalla.
+// Va por dentro de la frontera, más fino que ella y a unos píxeles, de forma que
+// el aro entero es visible en cualquier viewport. Contrapartida asumida: con el
+// montón crecido las fichas exteriores lo tapan — se dibuja debajo de ellas.
+// No pulsa: es progreso, no alarma.
+function drawGauge(){
+  cx.save();
+  cx.lineCap = "butt";                 // corte recto: el arco acaba en radio, no en punta
+  cx.lineWidth = PS*GAUGE_W;
+  cx.strokeStyle = GAUGE_TRACK;
+  cx.beginPath(); cx.arc(ox,oy,gaugeRad,0,7); cx.stroke();
+
+  const p = Math.max(0, Math.min(1, gaugeV/4));
+  if (p > 0.002){
+    // horario desde las 9: pasa por arriba y cierra en el punto de partida
+    cx.strokeStyle = GAUGE_FILL;
+    cx.beginPath(); cx.arc(ox,oy,gaugeRad,GAUGE_A0,GAUGE_A0+p*Math.PI*2); cx.stroke();
+  }
+  if (gaugeFlashT > 0){
+    cx.globalAlpha = gaugeFlashT/GAUGE_FLASH;
+    cx.lineWidth = PS*GAUGE_W*2.2;
+    cx.strokeStyle = "#ffffff";
+    cx.beginPath(); cx.arc(ox,oy,gaugeRad,0,7); cx.stroke();
+  }
+  cx.restore();
+}
+
 function draw(){
   // el degradado se estira hasta la esquina más lejana: en horizontal es lo
   // que llena los laterales, en vertical apenas cambia.
@@ -779,11 +859,17 @@ function draw(){
   }
   const prox = Math.min(1, far/R);
   cx.beginPath(); cx.arc(ox,oy,R,0,7);
-  cx.lineWidth = PS*0.012;
-  cx.strokeStyle = prox>0.82
-    ? `rgba(242,107,58,${0.55+0.45*Math.abs(Math.sin(t*7))})`
-    : "rgba(120,110,230,.75)";
-  cx.stroke();
+  cx.lineWidth = PS*BORDER_W;
+  if (prox > 0.82){
+    cx.save();
+    cx.globalAlpha = 0.55+0.45*Math.abs(Math.sin(t*7));
+    cx.strokeStyle = DANGER; cx.stroke();
+    cx.restore();
+  } else {
+    cx.strokeStyle = "rgba(120,110,230,.75)"; cx.stroke();
+  }
+
+  drawGauge();
 
   // aviso de la próxima ficha: arco de 35° fuera del círculo, en su color
   if (!dead && nextSpawn && spawnT < TELEGRAPH){
@@ -791,17 +877,23 @@ function draw(){
     const col = nextSpawn.k===WHITE ? PAINT[WHITE] : COL[nextSpawn.k];
     const a0 = nextSpawn.aArc - TELEGRAPH_ARC/2, a1 = nextSpawn.aArc + TELEGRAPH_ARC/2;
     const pulse = 0.35 + 0.65*p*(0.75+0.25*Math.sin(t*11));
+    // engorda al acercarse, pero creciendo hacia FUERA desde un borde interior
+    // fijo: el aire contra la frontera se mantiene en RING_GAP durante todo el
+    // latido en vez de abrirse y cerrarse con él.
+    const lw = PS*TELE_W*(0.6+0.4*p);
 
     cx.save();
-    cx.lineCap = "round";
-    // halo ancho y difuso
+    cx.lineCap = "butt";                 // corte recto, mismo remate que el gauge
+    // halo ancho y difuso: es resplandor, queda deliberadamente fuera de la
+    // progresión de grosores, pero arranca del MISMO borde interior que el trazo
+    // y crece solo hacia fuera, para no comerse el aire contra la frontera.
     cx.globalAlpha = 0.16*pulse;
-    cx.beginPath(); cx.arc(ox,oy,R*1.10,a0,a1);
-    cx.lineWidth = PS*0.085; cx.strokeStyle = col; cx.stroke();
+    cx.beginPath(); cx.arc(ox,oy,teleRadIn + PS*TELE_HALO_W/2,a0,a1);
+    cx.lineWidth = PS*TELE_HALO_W; cx.strokeStyle = col; cx.stroke();
     // trazo nítido
     cx.globalAlpha = 0.85*pulse;
-    cx.beginPath(); cx.arc(ox,oy,R*1.055,a0,a1);
-    cx.lineWidth = PS*0.017*(0.6+0.4*p); cx.strokeStyle = col; cx.stroke();
+    cx.beginPath(); cx.arc(ox,oy,teleRadIn + lw/2,a0,a1);
+    cx.lineWidth = lw; cx.strokeStyle = col; cx.stroke();
     cx.restore();
   }
 
@@ -900,10 +992,6 @@ function mix(a,b,p){
 }
 
 // ─── loop ──────────────────────────────────────────────────────────────────
-const segs=[];
-for (let i=0;i<4;i++){ const d=document.createElement("div"); d.className="seg";
-  document.getElementById("gauge").appendChild(d); segs.push(d); }
-
 let last = performance.now();
 function frame(now){
   const dt = Math.min(0.05,(now-last)/1000); last = now;
@@ -951,8 +1039,17 @@ function frame(now){
     // aviso único de la entrada del morado
     if (!purpleShown && t > PURPLE_START){ purpleShown = true; banner = 2.6; }
 
-    // el bonus se lanza solo al llenarse el medidor
-    if (gauge >= 4){ gauge = 0; spawnBonus(4); }
+    // el anillo persigue al valor lógico: commitFlash() suma de golpe, y un salto
+    // instantáneo de 60° es un parpadeo, no una recompensa.
+    gaugeV += (gauge - gaugeV)*Math.min(1, GAUGE_TWEEN*dt);
+    if (gaugeFlashT > 0) gaugeFlashT -= dt;
+    // el bonus espera a que el arco haya cerrado el anillo, no a que el contador
+    // llegue a 4: disparar con gaugeV a medias rompe la relación que busca el aro.
+    if (gauge >= 4 && gaugeV >= 3.97){
+      gaugeFlashT = GAUGE_FLASH;
+      spawnBonus(4);
+      gauge = 0;                 // gaugeV baja sola: el anillo se vacía barriendo
+    }
 
     stepFlying(dt);
     ageBubbles(dt);
@@ -965,9 +1062,12 @@ function frame(now){
 
   draw();
   document.getElementById("score").textContent = score;
-  const lv = Math.floor(gauge);
-  segs.forEach((s,i)=>s.classList.toggle("on", i<lv));
+  // el récord se mueve durante la partida, en espejo con el marcador de arriba:
+  // superarlo es un momento de juego, no un dato de menú.
+  if (score > bestScore) bestScore = score;
+  bestEl.textContent = bestScore;
   if (dead){
+    if (!bestSaved){ bestSaved = true; writeBest(bestScore); }
     document.getElementById("over").style.display="flex";
     document.getElementById("fin").textContent = score+" puntos";
   }
