@@ -358,7 +358,64 @@ const bestEl = document.getElementById("bestv");
 function idx(c,r){ return r*N+c; }
 function inb(c,r){ return c>=0&&c<N&&r>=0&&r<N; }
 function cheb(c,r){ return Math.max(Math.abs(c-C),Math.abs(r-C)); }
-function manh(c,r){ return Math.abs(c-C)+Math.abs(r-C); }
+const NB = [[0,-1],[0,1],[-1,0],[1,0]];   // adyacencia 4, sin diagonales
+
+// ─── la forma del campo ────────────────────────────────────────────────────
+// El jugador lee el campo en radial, así que la silueta se declara, no se
+// calcula: ningún umbral aproximado decide qué es borde ni qué cabe. `V` es
+// celda jugable, `X` es muro, indistinguible del exterior en todo el algoritmo.
+// Se lee de un vistazo y se retoca a mano —los picos, celdas que sobresalen con
+// un solo 4-vecino jugable, se tachan aquí— sin recalibrar ningún decimal.
+// 161 celdas jugables, entre 6.32 y 7.07 celdas de radio: es un disco
+// digitalizado, y esa variación es lo que se ve al girar. La máscara fija N:
+// cambiar N obliga a redibujarla, que es lo que se querría hacer de todos modos.
+const MASK = [
+  "XXXXXXVVVXXXXXX",
+  "XXXXVVVVVVVXXXX",
+  "XXVVVVVVVVVVVXX",
+  "XXVVVVVVVVVVVXX",
+  "XVVVVVVVVVVVVVX",
+  "XVVVVVVVVVVVVVX",
+  "VVVVVVVVVVVVVVV",
+  "VVVVVVVVVVVVVVV",
+  "VVVVVVVVVVVVVVV",
+  "XVVVVVVVVVVVVVX",
+  "XVVVVVVVVVVVVVX",
+  "XXVVVVVVVVVVVXX",
+  "XXVVVVVVVVVVVXX",
+  "XXXXVVVVVVVXXXX",
+  "XXXXXXVVVXXXXXX",
+];
+const PLAY = new Uint8Array(N*N);          // 1 = jugable
+let MASK_R = 0;                            // radio, en celdas, de la más lejana
+for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+  if (MASK[r][c] !== "V") continue;
+  PLAY[idx(c,r)] = 1;
+  MASK_R = Math.max(MASK_R, Math.hypot(c-C, r-C));
+}
+// sustituye a inb() en todo lo que decida ocupación de celdas —aterrizaje y
+// gravedad—; inb() se conserva donde solo se recorre el array.
+function playable(c,r){ return inb(c,r) && PLAY[idx(c,r)]===1; }
+
+// profundidad: 0 = muro; 1 = borde, celda jugable con algún 4-vecino que no lo
+// es; 2, 3... hacia dentro. Ni radios ni redondeos: es la medida con la que se
+// anuncia el peligro, y la que hace innecesario cualquier umbral.
+const DEPTH = new Int8Array(N*N);
+(function buildDepth(){
+  const q = [];
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    if (!playable(c,r)) continue;
+    for (const [dc,dr] of NB) if (!playable(c+dc,r+dr)){ DEPTH[idx(c,r)]=1; q.push([c,r]); break; }
+  }
+  for (let h=0; h<q.length; h++){          // BFS en 4-adyacencia, de fuera hacia dentro
+    const [c,r] = q[h];
+    for (const [dc,dr] of NB){
+      const p=c+dc, s=r+dr;
+      if (!playable(p,s) || DEPTH[idx(p,s)]) continue;
+      DEPTH[idx(p,s)] = DEPTH[idx(c,r)]+1; q.push([p,s]);
+    }
+  }
+})();
 
 function reset(){
   grid = new Array(N*N).fill(null);
@@ -399,7 +456,11 @@ function resize(){
 
   // el canvas ocupa la ventana entera — solo el fondo se expande a lo ancho —,
   // pero el juego mide la columna, no el viewport.
-  PS = STAGE; R = PS*R_FACTOR; CELL = R*2/N;
+  // manda la celda jugable más lejana, no el tamaño del array: el círculo
+  // dibujado queda a media celda por fuera de la bola más exterior posible, en
+  // todas las direcciones. Con 2R/N la rejilla se quedaba corta en los ejes y se
+  // pasaba en las diagonales, y el mismo montón moría o no según el giro.
+  PS = STAGE; R = PS*R_FACTOR; CELL = R/(MASK_R + 0.5);
   // la frontera manda: los otros dos anillos se sitúan a RING_GAP de su trazo.
   // Del aviso se guarda el borde INTERIOR, porque su grosor late con la cuenta
   // atrás y el aire debe ser el mismo en todo el latido, no solo en el pico.
@@ -435,8 +496,6 @@ function worldToCellF(x,y){
   const dx=x-ox, dy=y-oy, s=Math.sin(-angle), co=Math.cos(-angle);
   return [(dx*co - dy*s)/CELL + C, (dx*s + dy*co)/CELL + C];
 }
-const NB = [[0,-1],[0,1],[-1,0],[1,0]];   // adyacencia 4, sin diagonales
-
 // ─── spawn y vuelo ─────────────────────────────────────────────────────────
 // se decide con antelación para poder telegrafiarlo.
 // El arco marca la ZONA; el ángulo real cae en algún punto dentro de ella.
@@ -454,9 +513,10 @@ function pickNext(){
 // arco de aviso, y ya con su velocidad normal.
 function spawnNormal(n){
   const a = n.a, d = PS*0.52;
+  const x = ox+Math.cos(a)*d, y = oy+Math.sin(a)*d;
   lastColorAngle = a;
   flying.push({ bonus:false, k:n.k, hard:false, trail:[],
-                x:ox+Math.cos(a)*d, y:oy+Math.sin(a)*d,
+                x, y, px:x, py:y,
                 ux:-Math.cos(a), uy:-Math.sin(a), sp:PS*BUBBLE_SPEED,
                 acc:FALL_ACCEL });
 }
@@ -466,8 +526,9 @@ function spawnWhite(){
   const base = (lastColorAngle===null ? Math.random()*Math.PI*2 : lastColorAngle) + Math.PI;
   const a = base + (Math.random()-0.5)*WHITE_SPREAD;
   const d = PS*0.52;
+  const x = ox+Math.cos(a)*d, y = oy+Math.sin(a)*d;
   flying.push({ bonus:false, k:WHITE, hard:false, trail:[],
-                x:ox+Math.cos(a)*d, y:oy+Math.sin(a)*d,
+                x, y, px:x, py:y,
                 ux:-Math.cos(a), uy:-Math.sin(a), sp:PS*WHITE_SPEED,
                 acc:WHITE_ACCEL });
 }
@@ -475,14 +536,16 @@ function spawnWhite(){
 // el medidor y su premio comparten sitio, no solo momento.
 function spawnBonus(lvl){
   const a = GAUGE_A0;
+  const x = ox+Math.cos(a)*PS*0.50, y = oy+Math.sin(a)*PS*0.50;
   flying.push({ bonus:true, lvl, th:a, r:PS*0.50,
                 dir: Math.random()<0.5?1:-1, trail:[],
-                x:ox+Math.cos(a)*PS*0.50, y:oy+Math.sin(a)*PS*0.50 });
+                x, y, px:x, py:y });
 }
 
 function stepFlying(dt){
   for (let i=flying.length-1; i>=0; i--){
     const b = flying[i];
+    b.px = b.x; b.py = b.y;                           // origen del rayo del frame
     if (b.bonus){                                     // espiral hacia dentro
       b.th += SPIRAL_TANGENT*b.dir*dt*(PS*0.16/Math.max(b.r,PS*0.05));
       b.r  -= PS*SPIRAL_INWARD*dt;
@@ -495,55 +558,76 @@ function stepFlying(dt){
         b.trail.push([b.x,b.y]); if (b.trail.length>10) b.trail.shift();
       }
     }
-    const hit = checkHit(b);
-    if (hit){ flying.splice(i,1); land(b, hit); }
+    const shot = rayCast(b);
+    if (shot){ flying.splice(i,1); land(b, shot); }
     else if (Math.hypot(b.x-ox,b.y-oy) > PS*0.75) flying.splice(i,1);
   }
 }
 
-// devuelve la celda ocupada impactada, o null
-function checkHit(b){
-  const [fc,fr] = worldToCellF(b.x,b.y);
-  const c0 = Math.round(fc), r0 = Math.round(fr);
-  let best=null, bd=0.92;
-  for (let dc=-1; dc<=1; dc++) for (let dr=-1; dr<=1; dr++){
-    const c=c0+dc, r=r0+dr;
-    if (!inb(c,r) || !grid[idx(c,r)]) continue;
-    const d = Math.hypot(fc-c, fr-r);
-    if (d < bd){ bd=d; best=[c,r]; }
+// ─── aterrizaje por trazado de rayo ────────────────────────────────────────
+// Una sola regla, y es la que hay que poder decir en voz alta: la bola se
+// detiene en la última celda libre que atravesó. La colocación es función de la
+// trayectoria y de nada más — no hay conjunto de candidatos, ni desempate por
+// distancia, ni fallback: si el algoritmo necesitara uno es que la regla está
+// mal formulada. Se traza el segmento recorrido en el frame, no la posición
+// final, y eso es además lo que impide que un hard drop a 20 fps atraviese el
+// montón entre dos muestras.
+const RAY_STEP = 0.25;   // celdas: paso máximo de muestreo del segmento
+
+// Recorre [px,py] → [x,y] en coordenadas de grid. Devuelve el impacto —la
+// primera celda jugable y ocupada— junto con la última libre atravesada, o null
+// si el vuelo sigue. `b.free` persiste entre frames: es "la última libre de todo
+// el vuelo", y su ausencia en el impacto es la condición de muerte.
+function rayCast(b){
+  const [ac,ar] = worldToCellF(b.px, b.py);
+  const [bc,br] = worldToCellF(b.x,  b.y);
+  const steps = Math.max(1, Math.ceil(Math.hypot(bc-ac, br-ar)/RAY_STEP));
+  let lc = NaN, lr = NaN;
+  for (let i=0; i<=steps; i++){
+    const u = i/steps, fc = ac+(bc-ac)*u, fr = ar+(br-ar)*u;
+    const c = Math.round(fc), r = Math.round(fr);
+    if (c===lc && r===lr) continue;
+    lc = c; lr = r;
+    if (!playable(c,r)) continue;              // muro o exterior: ni frena ni cuenta
+    if (grid[idx(c,r)]) return { hit:[c,r], free:b.free||null, fc, fr, ac, ar, bc, br };
+    b.free = [c,r];
   }
-  return best;
+  return null;
 }
 
-// snap to grid: celda libre vecina de la impactada más próxima a la posición real
-function land(b, hit){
+// distancia de un centro de celda a la recta del rayo, en celdas
+function rayDist(c, r, s){
+  const vx = s.bc-s.ac, vy = s.br-s.ar, L = Math.hypot(vx,vy);
+  if (!L) return Math.hypot(c-s.ac, r-s.ar);
+  return Math.abs((c-s.ac)*vy - (r-s.ar)*vx)/L;
+}
+
+// La celda de reposo es la última libre, salvo que esta y la del impacto sean
+// diagonales entre sí: entonces manda una de las dos ortogonales intermedias, la
+// más cercana al rayo. Si ninguna está libre la última libre es correcta y la
+// bola queda encajada en la esquina, tocando dos bolas.
+function restCell(s){
+  if (!s.free) return null;
+  const [c,r] = s.free, [hc,hr] = s.hit;
+  if (Math.abs(c-hc)!==1 || Math.abs(r-hr)!==1) return s.free;
+  const opts = [[c,hr],[hc,r]].filter(([p,q]) => playable(p,q) && !grid[idx(p,q)]);
+  if (opts.length < 2) return opts[0] || s.free;
+  return rayDist(opts[0][0],opts[0][1],s) <= rayDist(opts[1][0],opts[1][1],s)
+       ? opts[0] : opts[1];
+}
+
+function land(b, s){
   // el bonus no ocupa celda: actúa sobre la celda del montón contra la que choca
-  if (b.bonus){ applyBonus(hit); return; }
+  if (b.bonus){ applyBonus(s.hit); return; }
 
-  const [fc,fr] = worldToCellF(b.x,b.y);
-  const [hc,hr] = hit;
-  let cell=null, bd=Infinity;
-  for (const [dc,dr] of NB){
-    const c=hc+dc, r=hr+dr;
-    if (!inb(c,r) || grid[idx(c,r)]) continue;
-    const d = Math.hypot(fc-c, fr-r);
-    if (d<bd){ bd=d; cell=[c,r]; }
-  }
-  if (!cell) cell = ringSearch(hc,hr);
-  if (!cell) return;
+  const cell = restCell(s);
+  // impactó sin haber tenido nunca una celda libre dentro del campo: no cabe.
+  // Es la única muerte del juego, y es la misma en todas las direcciones.
+  if (!cell){ dead = true; return; }
 
-  grid[idx(cell[0],cell[1])] = { k:b.k, age:0, vc:fc, vr:fr };
+  grid[idx(cell[0],cell[1])] = { k:b.k, age:0, vc:s.fc, vr:s.fr };
   refreshGroup(cell[0], cell[1]);
   resolve();
-}
-function ringSearch(c0,r0){
-  for (let rad=2; rad<N; rad++)
-    for (let dc=-rad; dc<=rad; dc++) for (let dr=-rad; dr<=rad; dr++){
-      if (Math.max(Math.abs(dc),Math.abs(dr))!==rad) continue;
-      const c=c0+dc, r=r0+dr;
-      if (inb(c,r) && !grid[idx(c,r)]) return [c,r];
-    }
-  return null;
 }
 
 // ─── cadenas, colateral, gravedad ──────────────────────────────────────────
@@ -613,8 +697,10 @@ function gravityPass(){
     const cells = [];
     for (let r=0;r<N;r++) for (let c=0;c<N;c++){
       const g = grid[idx(c,r)];
-      if (g && g.k>=0) cells.push([c,r,manh(c,r)]);
+      if (g && g.k>=0) cells.push([c,r,Math.hypot(c-C,r-C)]);
     }
+    // el orden decide qué bola reclama un hueco cuando dos podrían caer en él,
+    // así que se ordena con la misma métrica con la que se mueve: euclídea.
     cells.sort((a,b)=>a[2]-b[2]);                     // de dentro hacia fuera
     let any = false;
     for (const [c0,r0] of cells){
@@ -623,17 +709,18 @@ function gravityPass(){
       for (let step=0; step<N*2; step++){             // agota el recorrido
         const dx = C-c, dy = C-r;
         if (!dx && !dy) break;
-        const major = Math.abs(dx) >= Math.abs(dy) ? 0 : 1;   // empate → X
-        const opts = major===0
-          ? [[c+Math.sign(dx), r], [c, r+Math.sign(dy)]]
-          : [[c, r+Math.sign(dy)], [c+Math.sign(dx), r]];
-        let did = false;
-        for (const [p,s] of opts){
-          if ((p===c && s===r) || !inb(p,s) || grid[idx(p,s)]) continue;
-          grid[idx(p,s)] = grid[idx(c,r)]; grid[idx(c,r)] = null;
-          c=p; r=s; did = any = anyMoved = true; break;
-        }
-        if (!did) break;
+        // solo el vecino que más reduce el radio —el eje mayor, empate a X—. Si
+        // está ocupado o no es jugable la bola NO se mueve, aunque tenga hueco
+        // al lado: el rodeo lateral es lo que permitía a un match tirar de bolas
+        // que no estaban radialmente por fuera de él. Contrapartida aceptada:
+        // quedan bolas paradas junto a un hueco lateral, que es legible —no cayó
+        // porque no estaba encima— y preferible a un rodeo que nadie anticipa.
+        const mx = Math.abs(dx) >= Math.abs(dy);
+        const p = mx ? c+Math.sign(dx) : c;
+        const q = mx ? r : r+Math.sign(dy);
+        if (!playable(p,q) || grid[idx(p,q)]) break;
+        grid[idx(p,q)] = grid[idx(c,r)]; grid[idx(c,r)] = null;
+        c=p; r=q; any = anyMoved = true;
       }
     }
     if (!any) break;                                  // ya está estable
@@ -672,7 +759,7 @@ let flashT = 0, flashSet = new Set(), flashBonus = false, comboDepth = 0;
 
 function tryMatch(){
   const pops = findPops();
-  if (!pops.size){ checkDead(); return false; }
+  if (!pops.size) return false;
   flashSet = pops;
   flashBonus = false;
   flashT = FLASH_TIME;
@@ -822,7 +909,7 @@ function easeVisual(dt){
   }
 }
 
-// ─── petrificación y derrota ───────────────────────────────────────────────
+// ─── petrificación ─────────────────────────────────────────────────────────
 // El reloj de cada bola corre desde el primer segundo de partida, así el tutorial
 // del nivel 2 no llega a un tablero recién puesto a cero: al abrirse, las bolas
 // que el jugador no ha sabido limpiar ya están envejecidas, los avisos aparecen
@@ -840,14 +927,6 @@ function ageBubbles(dt){
     if (g.age > STONE_TIME) g.k = STONE;
   }
 }
-function checkDead(){
-  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
-    if (!grid[idx(c,r)]) continue;
-    const [x,y] = cellToWorld(c,r);
-    if (Math.hypot(x-ox,y-oy) > R){ dead = true; return; }
-  }
-}
-
 // ─── input ─────────────────────────────────────────────────────────────────
 // La velocidad angular sale de la "energía" del gesto: un arrastre corto y lento
 // gira despacio; uno amplio y rápido gira deprisa.
@@ -1078,17 +1157,17 @@ function draw(){
   g.addColorStop(0,"#141a34"); g.addColorStop(1,"#05050c");
   cx.fillStyle=g; cx.fillRect(0,0,W,H);
 
-  // frontera
-  let occ=0, far=0;
-  for (let i=0;i<N*N;i++) if (grid[i]) occ++;
-  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
-    if (!grid[idx(c,r)]) continue;
-    const [x,y]=cellToWorld(c,r); far=Math.max(far,Math.hypot(x-ox,y-oy));
-  }
-  const prox = Math.min(1, far/R);
+  // frontera. El aviso no es un umbral calibrado sino un hecho: late si hay
+  // alguna celda de profundidad 1 —de borde— ocupada, que es literalmente la
+  // condición de muerte con una bola de margen. Es global, no direccional: dice
+  // "estás en peligro", no "aquí"; el jugador ya está mirando el montón.
+  // Lo único calibrable: si el rojo entra tarde en los niveles altos, el
+  // disparador pasa de 1 a 2 —dos bolas de margen— y no se toca nada más.
+  let danger = false;
+  for (let i=0;i<N*N;i++) if (grid[i] && DEPTH[i]===1){ danger = true; break; }
   cx.beginPath(); cx.arc(ox,oy,R,0,7);
   cx.lineWidth = PS*BORDER_W;
-  if (prox > 0.82){
+  if (danger){
     cx.save();
     cx.globalAlpha = 0.55+0.45*Math.abs(Math.sin(t*7));
     cx.strokeStyle = DANGER; cx.stroke();
@@ -1281,7 +1360,6 @@ function frame(now){
 
     stepFlying(dt);
     ageBubbles(dt);
-    checkDead();
   }
   stepFlash(dt);
   easeVisual(dt);
