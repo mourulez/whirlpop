@@ -295,7 +295,7 @@ function showLevel(){
 // ─── estado ────────────────────────────────────────────────────────────────
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
-let grid, angle, angleT, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, deadBall, nextSpawn, whiteT, lastColorAngle;
+let grid, angle, angleT, anglePrev, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, deadBall, nextSpawn, whiteT, lastColorAngle;
 let level, tipT, gaugeEarly, forceK, prevSine, forceSine;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
 let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
@@ -470,8 +470,9 @@ function reset(){
   grid = new Array(N*N).fill(null);
   floaters = [];
   flashT = 0; flashSet = new Set(); flashBonus = false;
+  pendingBonus = null;
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
-  angle = angleT = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
+  angle = angleT = anglePrev = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
   spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; deadBall = null; lastColorAngle = null;
   forceK = null; prevSine = false; forceSine = false;
   // arranque en un nivel concreto (?nivel=N): toda la dificultad se deriva de
@@ -545,10 +546,15 @@ function cellToWorldF(fc,fr){
   return [ox + lx*co - ly*s, oy + lx*s + ly*co];
 }
 function cellToWorld(c,r){ return cellToWorldF(c,r); }
-function worldToCellF(x,y){
-  const dx=x-ox, dy=y-oy, s=Math.sin(-angle), co=Math.cos(-angle);
+// El tablero GIRA, así que una posición del mundo no significa lo mismo en dos
+// frames distintos: para llevarla a celdas hay que usar el ángulo que estaba en
+// vigor cuando se tomó. `worldToCellF` usa el de ahora, que es lo correcto para
+// todo lo que se dibuja; rayCast() necesita la variante explícita.
+function worldToCellA(x,y,ang){
+  const dx=x-ox, dy=y-oy, s=Math.sin(-ang), co=Math.cos(-ang);
   return [(dx*co - dy*s)/CELL + C, (dx*s + dy*co)/CELL + C];
 }
+function worldToCellF(x,y){ return worldToCellA(x, y, angle); }
 // ─── spawn y vuelo ─────────────────────────────────────────────────────────
 // se decide con antelación para poder telegrafiarlo.
 // El arco marca la ZONA; el ángulo real cae en algún punto dentro de ella.
@@ -721,7 +727,7 @@ function stepFlying(dt){
 // celdas puede no caer NUNCA dentro de una de ellas: pertenece a esa celda
 // durante menos de lo que mide un paso. En el 4% de las direcciones ese tramo
 // dura menos de 0.10 celdas. Cuando la celda saltada era la libre del borde,
-// `b.free` se quedaba a null y la bola moría contra la de detrás —una celda
+// `free` se quedaba a null y la bola moría contra la de detrás —una celda
 // entera hacia dentro, con hueco libre delante—: era la muerte que no se
 // entendía. Medido sobre un tablero con TODO el anillo de borde libre, donde
 // nadie debería morir jamás, el muestreo mataba en 32 de 3600 direcciones a 60
@@ -732,13 +738,45 @@ function stepFlying(dt){
 // ir saltando al siguiente cruce —en c o en r, el que caiga antes—: `tc` y `tr`
 // son la fracción del segmento a la que toca cada uno.
 
+// Cuánto se prolonga el segmento hacia atrás, en celdas. 1.5 ya garantiza cruzar
+// un borde de celda venga la bola por donde venga; 2 deja margen para que la
+// celda de detrás también esté pillada sin que eso mate a nadie.
+const RAY_BACK = 2;
+
 // Recorre [px,py] → [x,y] en coordenadas de grid. Devuelve el impacto —la
 // primera celda jugable y ocupada— junto con la última libre atravesada, o null
-// si el vuelo sigue. `b.free` persiste entre frames: es "la última libre de todo
-// el vuelo", y su ausencia en el impacto es la condición de muerte.
+// si el vuelo sigue. La ausencia de celda libre en el impacto es la condición de
+// muerte. El recorrido se rehace entero cada frame: lo único que sobrevive de un
+// frame al siguiente es `b.free`, y solo como red de seguridad revalidada —ver
+// stale()—, nunca como respuesta directa.
 function rayCast(b){
-  const [ac,ar] = worldToCellF(b.px, b.py);
-  const [bc,br] = worldToCellF(b.x,  b.y);
+  // El origen se convierte con el ángulo del frame ANTERIOR, que es el que el
+  // tablero tenía cuando la bola estaba ahí. Con los dos extremos convertidos con
+  // el mismo ángulo el barrido tangencial del giro se cancelaba solo y el rayo no
+  // lo veía: a 340°/s en el borde son 0.72 celdas por frame contra las 0.052 que
+  // avanza la bola por sí misma —14 veces más—, así que el montón le pasaba por
+  // delante sin tocarla y encallaba a media celda de donde se la veía chocar.
+  // La cuerda basta y no hay que subdividirla: la flecha del arco que sustituye
+  // es de 0.011 celdas a 60 fps y de 0.10 en el peor caso, 20 fps a tope de giro.
+  const [ac0,ar0] = worldToCellA(b.px, b.py, anglePrev);
+  const [bc,br]   = worldToCellF(b.x,  b.y);
+  // ...y se prolonga hacia atrás sobre la misma recta. La bola viene de ahí en
+  // línea recta, o sea que son celdas que recorrió de verdad, y volver a trazarlas
+  // cada frame es lo que permite calcular `free` ENTERO contra el grid vivo. Antes
+  // se arrastraba de un frame al siguiente, y dos bolas que compartieran celda en
+  // vuelo —una blanca lenta alcanzada por una de color, cosa fácil con el tablero
+  // vacío— anotaban las dos la misma celda libre: la segunda en aterrizar escribía
+  // encima de la primera y una de las dos desaparecía. Ahora la segunda ve la
+  // celda ocupada y se queda en la de detrás, que es justo donde está.
+  // Prolongar NO mueve la recta: `fc,fr`, `rayDist()` y la dirección de la muerte
+  // salen idénticos. Lo único que cambia es cuántas celdas se recorren —y que el
+  // tramo de atrás NO puede frenar a la bola: ahí ya no está. `t0` es la fracción
+  // en la que empieza el segmento de verdad, y una celda ocupada antes de `t0`
+  // solo corta el rastro de libres (lo de más atrás es inalcanzable), nunca mata.
+  const vc = bc-ac0, vr = br-ar0, L = Math.hypot(vc,vr);
+  const back = L ? RAY_BACK/L : 0;
+  const t0 = back/(1+back);
+  const ac = ac0 - vc*back, ar = ar0 - vr*back;
   const dc = bc-ac, dr = br-ar;
   const ec = Math.round(bc), er = Math.round(br);
   const sc = dc>0?1:-1, sr = dr>0?1:-1;
@@ -747,22 +785,44 @@ function rayCast(b){
   let tc = dc ? ((c+0.5*sc)-ac)/dc : Infinity;
   let tr = dr ? ((r+0.5*sr)-ar)/dr : Infinity;
   let tin = 0;                                 // fracción a la que se entró en (c,r)
-  // tope de seguridad: el segmento de un frame no llega a 2 celdas ni con hard
-  // drop a 20 fps, así que 64 celdas es holgura pura contra un NaN.
+  let free = null;                             // última libre atravesada, este frame
+  // La misma celda, sin el filtro del campo: la última VACÍA que atravesó, sea del
+  // campo o no. Es donde la bola se detendría si el tablero siguiera más allá, y es
+  // lo que se dibuja cuando la partida acaba. Ver land().
+  let slot = null;
+  // tope de seguridad: ni el segmento de un frame ni la prolongación llegan a 3
+  // celdas ni con hard drop a 20 fps, así que 64 celdas es holgura contra un NaN.
   for (let n=0; n<64; n++){
-    if (playable(c,r)){                        // muro o exterior: ni frena ni cuenta
-      // punto de ENTRADA en la celda: es donde la bola la toca, y de ahí sale la
-      // posición visual desde la que la ficha se asienta hacia el centro.
-      const fc = ac+dc*tin, fr = ar+dr*tin;
-      if (grid[idx(c,r)]) return { hit:[c,r], free:b.free||null, fc, fr, ac, ar, bc, br };
-      b.free = [c,r];
-    }
+    if (playable(c,r)){
+      if (grid[idx(c,r)]){
+        // se sale de la celda después de `t0`: la bola está aquí o llega aquí
+        if (Math.min(tc,tr) > t0){
+          // punto de ENTRADA en la celda: es donde la bola la toca, y de ahí sale
+          // la posición visual desde la que la ficha se asienta hacia el centro.
+          return { hit:[c,r], free:free||stale(b), slot, fc:ac+dc*tin, fr:ar+dr*tin,
+                   ac, ar, bc, br };
+        }
+        free = slot = null;                    // tramo de atrás cortado
+      } else free = slot = [c,r];
+    } else slot = [c,r];                       // muro o exterior: no frena, pero sí cuenta
     if (c===ec && r===er) break;
     if (tc<tr){ tin = tc; c += sc; tc += ddc; }
     else      { tin = tr; r += sr; tr += ddr; }
     if (tin > 1) break;                        // pasado el final del segmento
   }
+  if (free) b.free = free;                     // última libre conocida del vuelo
   return null;
+}
+
+// Red de seguridad, y solo eso: la última libre que la bola vio en frames
+// anteriores, devuelta ÚNICAMENTE si sigue libre ahora. El recorrido de este
+// frame ya cubre el caso normal; esto cubre el raro en que ni él ni la
+// prolongación encuentran hueco, y evita que eso se lea como "no cabe". Sin la
+// comprobación contra el grid vivo esta memoria es justo lo que hacía que una
+// bola escribiera encima de otra.
+function stale(b){
+  const f = b.free;
+  return f && playable(f[0],f[1]) && !grid[idx(f[0],f[1])] ? f : null;
 }
 
 // distancia de un centro de celda a la recta del rayo, en celdas
@@ -795,20 +855,33 @@ function land(b, s){
   // Es la única muerte del juego, y es la misma en todas las direcciones.
   if (!cell){
     dead = true;
-    // La bola que mata NO desaparece. Sale de `flying` como cualquier otra —el
-    // vuelo ha terminado— pero se queda dibujada apoyada contra el montón: a una
-    // celda del centro de la que ha impactado, sobre su propia trayectoria, que
-    // es exactamente la separación entre dos bolas vecinas del tablero. Ahí cae
-    // siempre por fuera de la última bola posible, que es lo que significa "no
-    // cabe". Sin esto el último fotograma enseña un game over sin causa a la
-    // vista: la bola se borraba en el mismo frame en que mataba.
-    const vx = s.bc-s.ac, vy = s.br-s.ar, L = Math.hypot(vx,vy);
-    deadBall = L ? { k:b.k, vc:s.hit[0]-vx/L, vr:s.hit[1]-vy/L }
-                 : { k:b.k, vc:s.fc, vr:s.fr };
+    // La bola que mata NO desaparece: sale de `flying` como cualquier otra —el
+    // vuelo ha terminado— pero se queda dibujada. Sin esto el último fotograma
+    // enseña un game over sin causa a la vista.
+    //
+    // Y se dibuja HACIENDO SNAP, con la regla de siempre aplicada a `slot`: la
+    // última celda vacía que atravesó, contando las de fuera del campo. No es un
+    // apaño para colocarla "por fuera": es que morir ES eso. La bola se detiene
+    // donde se detendría cualquier otra, solo que esa celda no pertenece al campo,
+    // y esa es exactamente la definición de "no cabe". Por eso no hace falta
+    // comprobar nada: si `slot` fuese del campo y estuviese libre, `free` no sería
+    // null y no habría muerte. Cae fuera por construcción, en todas las
+    // direcciones y gire el tablero lo que gire.
+    //
+    // El cálculo anterior —una celda hacia atrás sobre el vector del rayo— dejaba
+    // la bola fuera de la rejilla y dependía de una dirección que, desde que el
+    // rayo ve el giro, es la relativa y no la suya: girando la ponía AL LADO del
+    // montón en vez de por fuera, y en un 11% de las muertes encima de una casilla
+    // libre, que se lee "pero si cabía".
+    deadBall = s.slot ? { k:b.k, vc:s.slot[0], vr:s.slot[1] }
+                      : { k:b.k, vc:s.fc, vr:s.fr };
     return;
   }
 
-  grid[idx(cell[0],cell[1])] = { k:b.k, age:0, vc:s.fc, vr:s.fr };
+  // `fresh`: aterrizó con un destello ya en curso, así que su match —si lo hace—
+  // no lo ha provocado esa resolución. La marca viaja con la ficha, gravedad
+  // incluida, y commitFlash() la lee para no cobrarlo como combo. Ver ahí.
+  grid[idx(cell[0],cell[1])] = { k:b.k, age:0, vc:s.fc, vr:s.fr, fresh: flashT > 0 };
   refreshGroup(cell[0], cell[1]);
   resolve();
 }
@@ -939,6 +1012,9 @@ function splitComponents(set){
 // 2. al acabar el destello se vacían, cae el montón y se busca el siguiente match
 const FLASH_TIME = 0.19;
 let flashT = 0, flashSet = new Set(), flashBonus = false, comboDepth = 0;
+// un bonus que impacta con un destello en curso espera su turno en vez de pisarlo
+let pendingBonus = null;
+
 
 function tryMatch(){
   const pops = findPops();
@@ -1003,9 +1079,23 @@ function commitFlash(){
   flashSet = new Set(); flashBonus = false; flashT = 0;
   gravityPass();
 
-  // encadena: si la caída formó match, sube el combo y vuelve a destellar
+  // encadena: si la caída formó match, sube el combo y vuelve a destellar.
+  // Salvo que lo cierre una ficha aterrizada durante el destello: eso no es un
+  // eslabón de esta cadena, es una jugada del jugador, y empieza su propio combo
+  // desde cero. Antes se cobraba como combo del match anterior, que era regalo.
   const more = tryMatch();
-  if (more && !wasBonus) comboDepth++; else if (!more) comboDepth = 0;
+  let byFresh = false;
+  if (more) for (const i of flashSet) if (grid[i] && grid[i].fresh){ byFresh = true; break; }
+  if (!more || byFresh) comboDepth = 0;
+  else if (!wasBonus) comboDepth++;
+  // las marcas se consumen aquí: su destello ya se ha resuelto
+  for (const g of grid) if (g && g.fresh) g.fresh = false;
+
+  // el bonus esperó a que la resolución terminara entera, encadenados incluidos
+  if (flashT <= 0 && pendingBonus !== null){
+    const lv = pendingBonus; pendingBonus = null;
+    fireBonus(lv);
+  }
 }
 
 function stepFlash(dt){
@@ -1019,6 +1109,14 @@ function stepFlash(dt){
 // El nivel es el de la celda del MONTÓN contra la que choca, no el de una celda libre.
 function applyBonus(cell){
   const lv = Math.max(1, cheb(cell[0], cell[1]));   // nunca arrasa desde el núcleo
+  // El nivel se fija en el IMPACTO, que es lo que el jugador vio, pero el barrido
+  // puede tener que esperar: asignar flashSet con un destello en curso borraba el
+  // match que estaba parpadeando —ni estallaba ni puntuaba—. La espera no le
+  // quita nada al premio, porque lo que se guarda es el anillo, no las celdas.
+  if (flashT > 0){ pendingBonus = lv; return; }
+  fireBonus(lv);
+}
+function fireBonus(lv){
   const kill = new Set();
   for (let q=0;q<N;q++) for (let s=0;s<N;s++){
     if (cheb(q,s) < lv) continue;
@@ -1525,6 +1623,9 @@ function frame(now){
       rotT -= dt;
       if (rotT <= 0){ rotate(dir); rotT = holdRate(); }
     } else rotT = 0;
+    // el ángulo con el que se dibujó el frame anterior; rayCast() lo necesita para
+    // leer dónde estaba cada bola EN EL TABLERO, no en la pantalla.
+    anglePrev = angle;
     angle += (angleT-angle)*Math.min(1,ROT_TWEEN*dt);
 
     spawnT -= dt;
