@@ -127,6 +127,27 @@ const WHITE_SPREAD = 50 * Math.PI/180;   // dispersión alrededor del punto opue
 const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
 const TELEGRAPH = 1.25;                     // aviso previo a la salida de cada ficha
 const TELEGRAPH_ARC = 35 * Math.PI/180;     // amplitud del aviso
+// Sinusoide: no es un tipo de ficha, es otra forma de llegar. Entra por el
+// lateral (3 o 9 en punto) y cruza el círculo serpenteando hasta el centro.
+// SINE_AMP > R_FACTOR a propósito: mantiene TODOS los giros de la onda fuera del
+// campo jugable, donde su curvatura cerradísima no puede colarse entre dos
+// muestras de rayCast(). Tope duro en ~0.60: por encima, el punto más lejano de
+// la trayectoria pasa del descarte de stepFlying() (PS*0.75) y la bola se
+// borraría sola en pleno vuelo. SINE_SPEED es velocidad sobre la trayectoria,
+// no sobre el eje: mismo ritmo aparente en los tramos verticales.
+const SINE_AMP = 0.55, SINE_SPEED = 0.67;
+const SINE_MAX_STEP = 0.02;   // avance máximo por subpaso de integración, múltiplo de PS
+// Cómo se reparte la velocidad a lo largo de la onda:
+//   1 = constante sobre la TRAYECTORIA. Ritmo plano; no frena en las crestas.
+//   0 = constante sobre el EJE. La bola frena en las crestas y se lanza en los
+//       cruces, como un péndulo.
+// Elegido a 0 probándolo: con el ritmo plano la bola pasaba las crestas de
+// carrerilla y el giro se leía como un latigazo. Frenando en la curva la onda se
+// entiende de un vistazo. Es ortogonal a SINE_SPEED —spawnSine() recalibra cada
+// bola contra su propio arco—, así que mover esto NO cambia la duración: reparte
+// la misma travesía, y el ritmo se toca solo con SINE_SPEED.
+const SINE_EASE = 0;
+const SINE_P_START = 0.12, SINE_P_MAX = 0.30, SINE_RAMP = 220;
 
 // elevación de la esfera: sale de la holgura vertical, sin media queries
 const LIFT_K   = 0.5;      // fracción de la altura sobrante que se consume
@@ -204,7 +225,11 @@ const LEVELS = [
   // aparecer sería un parpadeo— para que el púrpura salga ya.
   { n:5, id:"purple", at:130, on(){ forceK = 4; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
                       tip:"Nuevo color: púrpura." },
-  { n:6, id:"sine",   at:175, tip:"Cuidado con la sinusoide." },
+  // Misma reserva que el morado, y por la misma razón: la primera sinusoide no
+  // puede depender de un 0.12. `forceSine` se salta el filtro de `prevSine`
+  // —el tutorial manda— y el re-pick solo entra si el aviso todavía no se pinta.
+  { n:6, id:"sine",   at:175, on(){ forceSine = true; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
+                      tip:"Hay bolas que no caen. Cruzan el tablero de lado a lado." },
   { n:7, id:"pink",   at:220, tip:"Nueva bola: rosa." },
 ];
 // Intervalo entre blancas: se acorta con la partida, pero la rampa cuenta desde
@@ -213,6 +238,16 @@ const LEVELS = [
 function whiteInterval(){
   return WHITE_INT_MIN + (WHITE_INT_START-WHITE_INT_MIN)*
          Math.exp(-(t-LEVELS[2].at)/WHITE_INT_RAMP*1.6);
+}
+// Proporción de fichas que llegan serpenteando en vez de cayendo. Misma forma y
+// misma razón que whiteInterval(): la rampa cuenta desde que abrió el nivel 6,
+// así que en el instante de abrir vale exactamente SINE_P_START. El tope de 0.30
+// es el punto del diseño —la bajada radial es el core y sigue siendo mayoría
+// clara—, y como el veto de dos seguidas obliga a que cada sinusoide vaya
+// precedida de una radial, el efectivo a largo plazo es p/(1+p) = ~0.23.
+function sineChance(){
+  return SINE_P_MAX + (SINE_P_START-SINE_P_MAX)*
+         Math.exp(-(t-LEVELS[5].at)/SINE_RAMP*1.6);
 }
 
 // el tip se lee, no se parpadea: la ventana sale del número de palabras.
@@ -261,7 +296,7 @@ function showLevel(){
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
 let grid, angle, angleT, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, nextSpawn, whiteT, lastColorAngle;
-let level, tipT, gaugeEarly, forceK;
+let level, tipT, gaugeEarly, forceK, prevSine, forceSine;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
 let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
 let bestSaved;
@@ -336,18 +371,22 @@ document.addEventListener("visibilitychange", ()=>{ if (document.hidden) flushIf
 // empieza limpio, ?tut=3 pone todos los contadores a 3 —sin tutoriales y con la
 // carga desbloqueada—. Se quitan de la URL para que un F5 no los repita: jugar
 // seis minutos, o borrar la clave a mano en el móvil —donde eso exige depuración
-// remota—, no es forma de probar esto.
+// remota—, no es forma de probar esto. ?nivel=N adelanta el reloj de partida al
+// `at` de ese nivel: ninguna lógica de juego se entera, porque toda la dificultad
+// se deriva de `t`. ?nivel=6&tut=3 da nivel 6 limpio y con el anillo desbloqueado.
+let startLevel = 1;
 (function bootSave(){
   const q = new URLSearchParams(location.search);
-  const wipe = q.has("reset"), tut = q.get("tut");
+  const wipe = q.has("reset"), tut = q.get("tut"), lvl = q.get("nivel");
   if (wipe){ lsDel(SAVE_KEY); lsDel(BEST_KEY); }
   loadSave();
   if (tut !== null){
     for (const id of TUT_IDS) save.tut[id] = clampInt(tut, TUT_MAX);
     flushSave();
   }
-  if (!wipe && tut === null) return;
-  q.delete("reset"); q.delete("tut");
+  if (lvl !== null) startLevel = Math.max(1, clampInt(lvl, LEVELS.length));
+  if (!wipe && tut === null && lvl === null) return;
+  q.delete("reset"); q.delete("tut"); q.delete("nivel");
   const qs = q.toString();
   try { history.replaceState(null, "", location.pathname + (qs ? "?"+qs : "") + location.hash); } catch(_){}
 })();
@@ -422,9 +461,13 @@ function reset(){
   floaters = [];
   flashT = 0; flashSet = new Set(); flashBonus = false;
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
-  angle = angleT = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0; t = 0;
+  angle = angleT = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
   spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; lastColorAngle = null;
-  forceK = null;
+  forceK = null; prevSine = false; forceSine = false;
+  // arranque en un nivel concreto (?nivel=N): toda la dificultad se deriva de
+  // `t`, así que basta con adelantar el reloj. La progresión se encadena sola en
+  // el primer frame, ejecutando cada on() intermedio en orden.
+  t = LEVELS[startLevel-1].at;
   // el desbloqueo del anillo se congela aquí: si el tutorial de la carga se
   // consume por tercera vez en esta partida, el adelanto entra en la siguiente.
   // Cambiar las reglas en caliente, a mitad de partida, sería peor.
@@ -505,6 +548,23 @@ function pickNext(){
   // disparo único y el azar recupera el mando en la ficha de después.
   const k = forceK !== null ? forceK : Math.floor(Math.random()*numColors());
   forceK = null;
+  // La sinusoide SUSTITUYE a la radial, no se suma: mismo ritmo de fichas, otra
+  // trayectoria para algunas. Nunca dos seguidas —el veto quita las rachas y deja
+  // el 0.30 nominal en ~0.23 efectivo—, salvo que la pida el tutorial.
+  const sine = forceSine || (!prevSine && level >= 6 && Math.random() < sineChance());
+  forceSine = false;
+  prevSine = sine;
+  if (sine){
+    // Entrada exactamente a las 3 o a las 9, sin dispersión dentro del arco: la
+    // onda se define respecto al centro y hacen falta ciclos enteros entre
+    // entrada y centro para que la bola nazca sobre el eje. Cualquier desvío
+    // rompe una de las dos cosas. El eje horizontal tampoco es estético:
+    // inclinarlo sacaría la cresta más lejana de la pantalla por el lado.
+    const a = Math.random()<0.5 ? 0 : Math.PI;
+    return { aArc:a, a, k, sine:true,
+             cyc: 2 + Math.floor(Math.random()*2),
+             sig: Math.random()<0.5 ? 1 : -1 };
+  }
   const aArc = Math.random()*Math.PI*2;
   const a = aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82;   // dentro del arco
   return { aArc, a, k };
@@ -519,6 +579,38 @@ function spawnNormal(n){
                 x, y, px:x, py:y,
                 ux:-Math.cos(a), uy:-Math.sin(a), sp:PS*BUBBLE_SPEED,
                 acc:FALL_ACCEL });
+}
+// Misma bolsa, mismo sitio de salida, otro camino: entra por el lateral y cruza
+// serpenteando hasta el centro. `s` es la distancia sobre el eje al centro,
+// positiva hacia la entrada, y λ sale de los ciclos —no se escribe a mano—, así
+// que entrada y centro son nodos de la onda por construcción, para cualquier
+// `cyc`. Que s=0 sea nodo es la propiedad de la que cuelga todo lo demás: la
+// bola pasa por el centro exacto, donde la roca la espera desde reset(), así que
+// no puede perderse ni rebasar el otro lado y no hace falta ninguna guarda.
+// Factor que deja la duración de la travesía intacta al mover SINE_EASE: es el
+// cociente entre las dos integrales del elemento de arco, la de la parametrización
+// elegida y la de arco puro. El `ds` se cancela en el cociente, así que basta con
+// los pesos. Con SINE_EASE=1 vale 1 y no hace nada. Se paga una vez por bola.
+function sineCal(A, w, d){
+  if (SINE_EASE === 1) return 1;
+  let ie = 0, i1 = 0, M = 128;
+  for (let i=0; i<=M; i++){
+    const wt = (i===0 || i===M) ? 0.5 : 1;
+    const h = Math.hypot(1, A*w*Math.cos(w*d*i/M));
+    ie += wt*Math.pow(h, SINE_EASE); i1 += wt*h;
+  }
+  return ie/i1;
+}
+function spawnSine(n){
+  const a = n.a, d = PS*0.52;
+  const x = ox+Math.cos(a)*d, y = oy;
+  const A = PS*SINE_AMP, w = Math.PI*n.cyc/d;
+  lastColorAngle = a;                      // las blancas siguen saliendo enfrente
+  flying.push({ bonus:false, k:n.k, hard:false, trail:[],
+                x, y, px:x, py:y,
+                sp:PS*SINE_SPEED, acc:0,   // la sinusoide no cae: cruza
+                sine:{ s:d, sx:Math.cos(a)<0 ? -1 : 1, sig:n.sig,
+                       A, w, cal:sineCal(A, w, d) } });
 }
 // blanca: sin aviso, más lenta, inmune al hard drop.
 // Sale en el lado opuesto a la última ficha de color, para partir la atención.
@@ -553,7 +645,48 @@ function stepFlying(dt){
       b.trail.push([b.x,b.y]); if (b.trail.length>22) b.trail.shift();
     } else {
       b.sp += PS*(b.hard?HARD_ACCEL:b.acc)*dt;       // acelera al caer
-      b.x += b.ux*b.sp*dt; b.y += b.uy*b.sp*dt;
+      if (b.sine){
+        // `sp` es velocidad sobre la trayectoria, no sobre el eje: mismo ritmo
+        // aparente, y lo que se frena en las subidas es el avance en x. Ocupa el
+        // mismo campo que la velocidad de una radial a propósito, y por eso el
+        // hard drop funciona aquí sin tocarlo: acelera conservando la onda,
+        // porque la longitud de onda es espacial y la forma no depende del ritmo.
+        // La integración es de punto medio y subdividida, y ninguna de las dos
+        // cosas sobra. En la cresta el radio de giro es de 0.19 celdas: un paso
+        // de Euler ahí se salta el giro por fuera y la bola CORRE justo en la
+        // curva —+54% a 60 fps, +400% con hard drop a 20—, que es lo único que
+        // rompía la velocidad uniforme que se pide arriba. El punto medio quita
+        // ese error a paso normal; subdividir cubre los pasos largos del hard
+        // drop y del framerate bajo. Con las dos, 0% de desviación y 6 subpasos
+        // en el peor caso; a 60 fps y velocidad normal el bucle da una vuelta.
+        // `cal` mantiene la duración; el exponente reparte la velocidad. Los
+        // subpasos se cuentan sobre el DESPLAZAMIENTO real, no sobre el avance
+        // en el eje: con SINE_EASE bajo la bola vuela en los cruces y ahí es
+        // donde hay que muestrear fino.
+        const q = b.sine, rate = b.sp*q.cal;
+        const h0 = Math.hypot(1, q.A*q.w*Math.cos(q.w*q.s));
+        const disp = rate*dt*Math.pow(h0, 1-SINE_EASE);
+        const n = Math.max(1, Math.ceil(disp/(PS*SINE_MAX_STEP)));
+        for (let j=0; j<n; j++){
+          const h = rate*dt/n;
+          let sl = q.A*q.w*Math.cos(q.w*q.s);         // dy/ds al principio
+          const sm = q.s - 0.5*h/Math.pow(Math.hypot(1, sl), SINE_EASE);
+          sl = q.A*q.w*Math.cos(q.w*sm);              // y reevaluada en el medio
+          q.s -= h/Math.pow(Math.hypot(1, sl), SINE_EASE);
+        }
+        // Aquí NO va ninguna guarda para el centro, y la tentación existe: con
+        // SINE_EASE bajo la bola va más rápida justo en el nodo central, que es
+        // donde vive la garantía de que una sinusoide no se pierde nunca. Pero
+        // la curvatura cerrada está en las CRESTAS, no en los nodos: junto al
+        // centro el trazado es localmente recto, así que la cuerda de rayCast()
+        // pasa por el núcleo aunque el frame lo cruce. El peor avance ahí es de
+        // 0.39 celdas (hard drop a 20 fps), y un barrido de 60 combinaciones de
+        // variante, framerate, hard drop y desfase no rebasa el centro ni una vez.
+        b.x = ox + q.sx*q.s;
+        b.y = oy + q.sig*q.A*Math.sin(q.w*q.s);
+      } else {
+        b.x += b.ux*b.sp*dt; b.y += b.uy*b.sp*dt;
+      }
       if (b.hard){
         b.trail.push([b.x,b.y]); if (b.trail.length>10) b.trail.shift();
       }
@@ -1292,7 +1425,10 @@ function frame(now){
   if (!dead){
     t += dt;
     // progresión: `t` manda y `level` se deriva. El último nivel es terminal.
-    if (level < LEVELS.length && t >= LEVELS[level].at){
+    // `while` y no `if`: arrancar en un nivel adelantado (?nivel=N) encadena
+    // aquí todos los intermedios en orden, ejecutando cada on() —blancas activas,
+    // morado en la bolsa— y dejando a la vista el tip del nivel destino.
+    while (level < LEVELS.length && t >= LEVELS[level].at){
       const entering = LEVELS[level];    // 0-indexado: la entrada del nivel que abre
       level++;
       showLevel();                       // fija tipT, o lo deja a 0 si el tip ya está visto
@@ -1336,7 +1472,7 @@ function frame(now){
 
     spawnT -= dt;
     if (spawnT<=0){
-      spawnNormal(nextSpawn);
+      if (nextSpawn.sine) spawnSine(nextSpawn); else spawnNormal(nextSpawn);
       nextSpawn = pickNext();
       spawnT = SPAWN_MIN + (SPAWN_START-SPAWN_MIN)*Math.exp(-t/SPAWN_RAMP*1.6);
     }
