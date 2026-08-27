@@ -881,8 +881,33 @@ function land(b, s){
   // `fresh`: aterrizó con un destello ya en curso, así que su match —si lo hace—
   // no lo ha provocado esa resolución. La marca viaja con la ficha, gravedad
   // incluida, y commitFlash() la lee para no cobrarlo como combo. Ver ahí.
-  grid[idx(cell[0],cell[1])] = { k:b.k, age:0, vc:s.fc, vr:s.fr, fresh: flashT > 0 };
-  refreshGroup(cell[0], cell[1]);
+  const nb = { k:b.k, age:0, vc:s.fc, vr:s.fr, fresh: flashT > 0 };
+  grid[idx(cell[0],cell[1])] = nb;
+
+  // El montón se asienta AQUÍ, en el aterrizaje, no solo al estallar.
+  //
+  // Antes la gravedad únicamente corría dentro de commitFlash(), así que una
+  // bola que paraba contra un saliente —con hueco radialmente por dentro— se
+  // quedaba colgada indefinidamente. El siguiente match, en cualquier punto del
+  // tablero, disparaba el barrido global y esas bolas caían TODAS de golpe: el
+  // 60% de los movimientos posteriores a un match eran deuda vieja de otros
+  // disparos, a 3,4 celdas de media del match y hasta 9, en la punta contraria.
+  // Lo que el match suelta de verdad no pasa de 3 celdas.
+  //
+  // Asentando al caer el montón está siempre estable, y entonces un match solo
+  // puede mover lo que él mismo ha soltado: la cadena sigue ocurriendo, pero
+  // ocurre donde el jugador está mirando. El 89% de los disparos no desliza
+  // nada —la bola sigue parando donde toca—; el resto desliza una celda, y ese
+  // deslizamiento se ve, porque `vc`/`vr` salen del punto de impacto.
+  //
+  // Con un destello en curso NO se asienta: flashSet guarda índices, y mover
+  // fichas por debajo dejaría esos índices apuntando a celdas equivocadas.
+  // No hace falta, además: el commitFlash() que viene lo asienta 0,19 s después.
+  let ac = cell[0], ar = cell[1];
+  if (flashT <= 0 && gravityPass()){
+    for (let i=0;i<N*N;i++) if (grid[i] === nb){ ac = i%N; ar = (i/N)|0; break; }
+  }
+  refreshGroup(ac, ar);
   resolve();
 }
 
