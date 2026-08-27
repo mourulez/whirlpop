@@ -130,8 +130,8 @@ const TELEGRAPH_ARC = 35 * Math.PI/180;     // amplitud del aviso
 // Sinusoide: no es un tipo de ficha, es otra forma de llegar. Entra por el
 // lateral (3 o 9 en punto) y cruza el círculo serpenteando hasta el centro.
 // SINE_AMP > R_FACTOR a propósito: mantiene TODOS los giros de la onda fuera del
-// campo jugable, donde su curvatura cerradísima no puede colarse entre dos
-// muestras de rayCast(). Tope duro en ~0.60: por encima, el punto más lejano de
+// campo jugable, donde su curvatura cerradísima no puede colarse entre los dos
+// extremos del segmento que traza rayCast() en un frame. Tope duro en ~0.60: por encima, el punto más lejano de
 // la trayectoria pasa del descarte de stepFlying() (PS*0.75) y la bola se
 // borraría sola en pleno vuelo. SINE_SPEED es velocidad sobre la trayectoria,
 // no sobre el eje: mismo ritmo aparente en los tramos verticales.
@@ -295,7 +295,7 @@ function showLevel(){
 // ─── estado ────────────────────────────────────────────────────────────────
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
-let grid, angle, angleT, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, nextSpawn, whiteT, lastColorAngle;
+let grid, angle, angleT, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, deadBall, nextSpawn, whiteT, lastColorAngle;
 let level, tipT, gaugeEarly, forceK, prevSine, forceSine;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
 let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
@@ -405,25 +405,35 @@ const NB = [[0,-1],[0,1],[-1,0],[1,0]];   // adyacencia 4, sin diagonales
 // celda jugable, `X` es muro, indistinguible del exterior en todo el algoritmo.
 // Se lee de un vistazo y se retoca a mano —los picos, celdas que sobresalen con
 // un solo 4-vecino jugable, se tachan aquí— sin recalibrar ningún decimal.
-// 161 celdas jugables, entre 6.32 y 7.07 celdas de radio: es un disco
+// 177 celdas jugables, entre 6.71 y 7.28 celdas de radio: es un disco
 // digitalizado, y esa variación es lo que se ve al girar. La máscara fija N:
 // cambiar N obliga a redibujarla, que es lo que se querría hacer de todos modos.
+//
+// Por qué ESTAS 177 y no otras. La frontera se dibuja a MASK_R+0.5, o sea la
+// pone la celda MÁS lejana; pero en las direcciones donde la silueta se queda
+// corta la última bola posible deja un hueco visible contra ese trazo, y ahí un
+// game over se lee como injusto: "si aún cabía". Lo que hay que minimizar es la
+// DISPERSIÓN radial de la silueta, no su tamaño. Barridas las 86 máscaras que
+// caben en N=15 sin picos, conexas y sin huecos, esta es la de menor hueco
+// máximo: 0.62 celdas, contra 0.80 de la anterior —y el hueco medio pasa de
+// 0.38 a 0.24—. No baja de ahí: rejilla cuadrada contra círculo, a esta
+// resolución no da más.
 const MASK = [
-  "XXXXXXVVVXXXXXX",
-  "XXXXVVVVVVVXXXX",
-  "XXVVVVVVVVVVVXX",
+  "XXXXXVVVVVXXXXX",
+  "XXXVVVVVVVVVXXX",
   "XXVVVVVVVVVVVXX",
   "XVVVVVVVVVVVVVX",
   "XVVVVVVVVVVVVVX",
   "VVVVVVVVVVVVVVV",
   "VVVVVVVVVVVVVVV",
   "VVVVVVVVVVVVVVV",
+  "VVVVVVVVVVVVVVV",
+  "VVVVVVVVVVVVVVV",
   "XVVVVVVVVVVVVVX",
   "XVVVVVVVVVVVVVX",
   "XXVVVVVVVVVVVXX",
-  "XXVVVVVVVVVVVXX",
-  "XXXXVVVVVVVXXXX",
-  "XXXXXXVVVXXXXXX",
+  "XXXVVVVVVVVVXXX",
+  "XXXXXVVVVVXXXXX",
 ];
 const PLAY = new Uint8Array(N*N);          // 1 = jugable
 let MASK_R = 0;                            // radio, en celdas, de la más lejana
@@ -462,7 +472,7 @@ function reset(){
   flashT = 0; flashSet = new Set(); flashBonus = false;
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
   angle = angleT = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
-  spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; lastColorAngle = null;
+  spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; deadBall = null; lastColorAngle = null;
   forceK = null; prevSine = false; forceSine = false;
   // arranque en un nivel concreto (?nivel=N): toda la dificultad se deriva de
   // `t`, así que basta con adelantar el reloj. La progresión se encadena sola en
@@ -704,8 +714,23 @@ function stepFlying(dt){
 // distancia, ni fallback: si el algoritmo necesitara uno es que la regla está
 // mal formulada. Se traza el segmento recorrido en el frame, no la posición
 // final, y eso es además lo que impide que un hard drop a 20 fps atraviese el
-// montón entre dos muestras.
-const RAY_STEP = 0.25;   // celdas: paso máximo de muestreo del segmento
+// montón entre dos frames.
+//
+// El recorrido es exacto, no muestreado, y la diferencia no es cosmética. Con
+// muestras cada 0.25 celdas, un segmento que pasa rozando la esquina entre dos
+// celdas puede no caer NUNCA dentro de una de ellas: pertenece a esa celda
+// durante menos de lo que mide un paso. En el 4% de las direcciones ese tramo
+// dura menos de 0.10 celdas. Cuando la celda saltada era la libre del borde,
+// `b.free` se quedaba a null y la bola moría contra la de detrás —una celda
+// entera hacia dentro, con hueco libre delante—: era la muerte que no se
+// entendía. Medido sobre un tablero con TODO el anillo de borde libre, donde
+// nadie debería morir jamás, el muestreo mataba en 32 de 3600 direcciones a 60
+// fps y en 56 con hard drop a 20; el recorrido exacto, en 0 de 3600 en las
+// cuatro combinaciones. Y de paso se va la dependencia del framerate.
+//
+// Los bordes de celda están en los semienteros, así que recorrerlas en orden es
+// ir saltando al siguiente cruce —en c o en r, el que caiga antes—: `tc` y `tr`
+// son la fracción del segmento a la que toca cada uno.
 
 // Recorre [px,py] → [x,y] en coordenadas de grid. Devuelve el impacto —la
 // primera celda jugable y ocupada— junto con la última libre atravesada, o null
@@ -714,16 +739,28 @@ const RAY_STEP = 0.25;   // celdas: paso máximo de muestreo del segmento
 function rayCast(b){
   const [ac,ar] = worldToCellF(b.px, b.py);
   const [bc,br] = worldToCellF(b.x,  b.y);
-  const steps = Math.max(1, Math.ceil(Math.hypot(bc-ac, br-ar)/RAY_STEP));
-  let lc = NaN, lr = NaN;
-  for (let i=0; i<=steps; i++){
-    const u = i/steps, fc = ac+(bc-ac)*u, fr = ar+(br-ar)*u;
-    const c = Math.round(fc), r = Math.round(fr);
-    if (c===lc && r===lr) continue;
-    lc = c; lr = r;
-    if (!playable(c,r)) continue;              // muro o exterior: ni frena ni cuenta
-    if (grid[idx(c,r)]) return { hit:[c,r], free:b.free||null, fc, fr, ac, ar, bc, br };
-    b.free = [c,r];
+  const dc = bc-ac, dr = br-ar;
+  const ec = Math.round(bc), er = Math.round(br);
+  const sc = dc>0?1:-1, sr = dr>0?1:-1;
+  const ddc = dc ? Math.abs(1/dc) : Infinity, ddr = dr ? Math.abs(1/dr) : Infinity;
+  let c = Math.round(ac), r = Math.round(ar);
+  let tc = dc ? ((c+0.5*sc)-ac)/dc : Infinity;
+  let tr = dr ? ((r+0.5*sr)-ar)/dr : Infinity;
+  let tin = 0;                                 // fracción a la que se entró en (c,r)
+  // tope de seguridad: el segmento de un frame no llega a 2 celdas ni con hard
+  // drop a 20 fps, así que 64 celdas es holgura pura contra un NaN.
+  for (let n=0; n<64; n++){
+    if (playable(c,r)){                        // muro o exterior: ni frena ni cuenta
+      // punto de ENTRADA en la celda: es donde la bola la toca, y de ahí sale la
+      // posición visual desde la que la ficha se asienta hacia el centro.
+      const fc = ac+dc*tin, fr = ar+dr*tin;
+      if (grid[idx(c,r)]) return { hit:[c,r], free:b.free||null, fc, fr, ac, ar, bc, br };
+      b.free = [c,r];
+    }
+    if (c===ec && r===er) break;
+    if (tc<tr){ tin = tc; c += sc; tc += ddc; }
+    else      { tin = tr; r += sr; tr += ddr; }
+    if (tin > 1) break;                        // pasado el final del segmento
   }
   return null;
 }
@@ -756,7 +793,20 @@ function land(b, s){
   const cell = restCell(s);
   // impactó sin haber tenido nunca una celda libre dentro del campo: no cabe.
   // Es la única muerte del juego, y es la misma en todas las direcciones.
-  if (!cell){ dead = true; return; }
+  if (!cell){
+    dead = true;
+    // La bola que mata NO desaparece. Sale de `flying` como cualquier otra —el
+    // vuelo ha terminado— pero se queda dibujada apoyada contra el montón: a una
+    // celda del centro de la que ha impactado, sobre su propia trayectoria, que
+    // es exactamente la separación entre dos bolas vecinas del tablero. Ahí cae
+    // siempre por fuera de la última bola posible, que es lo que significa "no
+    // cabe". Sin esto el último fotograma enseña un game over sin causa a la
+    // vista: la bola se borraba en el mismo frame en que mataba.
+    const vx = s.bc-s.ac, vy = s.br-s.ar, L = Math.hypot(vx,vy);
+    deadBall = L ? { k:b.k, vc:s.hit[0]-vx/L, vr:s.hit[1]-vy/L }
+                 : { k:b.k, vc:s.fc, vr:s.fr };
+    return;
+  }
 
   grid[idx(cell[0],cell[1])] = { k:b.k, age:0, vc:s.fc, vr:s.fr };
   refreshGroup(cell[0], cell[1]);
@@ -1382,6 +1432,13 @@ function draw(){
         cx.globalAlpha = 1;
       }
     }
+  }
+
+  // la causante del game over, en coordenadas de grid como las del montón:
+  // gira con el tablero y no se mueve más, porque con `dead` nada avanza.
+  if (deadBall){
+    const [x,y] = cellToWorldF(deadBall.vc, deadBall.vr);
+    bubble(x,y, deadBall.k===WHITE?PAINT[WHITE]:COL[deadBall.k], rad, true);
   }
 
   for (const b of flying){
