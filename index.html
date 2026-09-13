@@ -294,7 +294,7 @@ function showLevel(){
 
 // ─── estado ────────────────────────────────────────────────────────────────
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
-let W,H,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
+let W,H,DPR,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
 let grid, angle, angleT, anglePrev, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, deadBall, outBall, nextSpawn, whiteT, lastColorAngle;
 let level, tipT, gaugeEarly, forceK, prevSine, forceSine;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
@@ -503,13 +503,12 @@ function resize(){
   STAGE = Math.min(W, H*STAGE_ASPECT);
   document.documentElement.style.setProperty("--stage", STAGE+"px");
 
-  // buffer a resolución de dispositivo, dibujo en px CSS. Redimensionar el
-  // canvas resetea la matriz, así que la transformación se reaplica aquí.
-  const DPR = Math.min(3, devicePixelRatio || 1);
+  // buffer a resolución de dispositivo, dibujo en px CSS. La matriz que lo
+  // traduce no se fija aquí sino en cada draw(): ver allí.
+  DPR = Math.min(3, devicePixelRatio || 1);
   cv.width  = Math.round(W*DPR);
   cv.height = Math.round(H*DPR);
   cv.style.width = W+"px"; cv.style.height = H+"px";
-  cx.setTransform(DPR,0,0,DPR,0,0);
 
   // el canvas ocupa la ventana entera — solo el fondo se expande a lo ancho —,
   // pero el juego mide la columna, no el viewport.
@@ -1565,6 +1564,12 @@ function drawGauge(){
 }
 
 function draw(){
+  // la matriz px CSS → buffer se repone en cada frame, no solo en resize(): el
+  // navegador puede tirar el contexto de una pestaña que lleva rato en segundo
+  // plano y devolverlo con el estado a cero, sin resize. Con la matriz identidad
+  // todo salía a escala 1/DPR, encogido en la esquina superior izquierda, hasta
+  // el siguiente resize. Es asignar seis números: no cuesta nada.
+  cx.setTransform(DPR,0,0,DPR,0,0);
   // el degradado se estira hasta la esquina más lejana: en horizontal es lo
   // que llena los laterales, en vertical apenas cambia.
   const gR = Math.max(PS*0.85, Math.hypot(W,H)/2);

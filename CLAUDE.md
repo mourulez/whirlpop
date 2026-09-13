@@ -41,8 +41,11 @@ orientativo: 80 líneas.
 No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 
 - Se genera una copia de `index.html` con un `<script>` extra tras el
-  principal, y se sustituye `requestAnimationFrame(frame);` por nada.
+  principal, y se sustituyen **todas** las `requestAnimationFrame(frame);` por
+  nada: `frame()` se reprograma a sí misma y el headless no termina.
 - Se avanza a mano con `frame(now)` y `dt` fijo, con `Math.random` sembrado.
+  Antes del primer frame, `last = 0`: arranca con el `performance.now()` real y
+  el primer `dt` rompe el determinismo, incluso de `HEAD` contra `HEAD`.
 - La ventana se simula redefiniendo `innerWidth`/`innerHeight` y llamando a
   `resize()`.
 - El input se simula despachando `PointerEvent`/`KeyboardEvent` reales, con
