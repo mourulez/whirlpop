@@ -45,12 +45,13 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 - Se avanza a mano con `frame(now)` y `dt` fijo, con `Math.random` sembrado.
 - La ventana se simula redefiniendo `innerWidth`/`innerHeight` y llamando a
   `resize()`.
-- El resultado sale por `--dump-dom` o por `--screenshot`.
+- El resultado sale por `--dump-dom`. `--screenshot` saca el canvas en negro:
+  para verlo, `draw()` y volcar `cv.toDataURL()` al DOM.
 - Perfil nuevo por ejecución (`--user-data-dir`): el guardado de `localStorage`
   cambia la partida.
 - URL con `?reset&tut=3&nivel=N`.
-- Headless dispara un `resize` tras cargar, que limpia el canvas: para una
-  captura hay que repintar con `draw()` después.
+- Un grid montado a mano tiene que estar asentado (`gravityPass()` no mueve
+  nada): si no, el primer destello lo recoloca y la prueba mide otra cosa.
 - Un cambio que no debe alterar el juego se demuestra con partidas sembradas
   idénticas contra `HEAD`: mismo grid, puntuación y frame de muerte. Un bug se
   demuestra primero reproduciéndolo en `HEAD`.
@@ -79,6 +80,6 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 
 ## Entorno
 
-- Windows, con Git Bash y PowerShell. No hay node.
+- Windows, con Git Bash y PowerShell. No hay node; sí `python3`.
 - Chrome en `C:/Program Files/Google/Chrome/Application/chrome.exe`.
-- `to list.md` es del usuario y está excluido en `.git/info/exclude`: no tocarlo.
+- `to-do list.md` es del usuario y está excluido en `.git/info/exclude`: no tocarlo.
