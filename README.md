@@ -25,5 +25,6 @@ está en ese fichero.
 ## Estructura
 
 - `index.html` — el juego completo: lógica, estilos y assets en un solo fichero.
+- `CLAUDE.md` — reglas transversales, verificación y flujo de trabajo para Claude.
 - `.nojekyll` — evita que GitHub Pages procese el sitio con Jekyll.
 - `.gitignore` — ficheros que no se versionan (temporales del sistema y de editores).
