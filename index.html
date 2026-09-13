@@ -562,13 +562,11 @@ function cellToScreen(fc,fr){
 }
 // El tablero GIRA, así que una posición del mundo no significa lo mismo en dos
 // frames distintos: para llevarla a celdas hay que usar el ángulo que estaba en
-// vigor cuando se tomó. `worldToCellF` usa el de ahora; rayCast() necesita
-// además la variante explícita.
+// vigor cuando se tomó: por eso el ángulo se pasa siempre explícito.
 function worldToCellA(x,y,ang){
   const s=Math.sin(-ang), co=Math.cos(-ang);
   return [(x*co - y*s)/CELL_PS + C, (x*s + y*co)/CELL_PS + C];
 }
-function worldToCellF(x,y){ return worldToCellA(x, y, angle); }
 // ─── spawn y vuelo ─────────────────────────────────────────────────────────
 // se decide con antelación para poder telegrafiarlo.
 // El arco marca la ZONA; el ángulo real cae en algún punto dentro de ella.
@@ -757,23 +755,54 @@ function stepFlying(dt){
 // celda de detrás también esté pillada sin que eso mate a nadie.
 const RAY_BACK = 2;
 
-// Recorre [px,py] → [x,y] en coordenadas de grid. Devuelve el impacto —la
+// Cuánto puede separarse el trazado del camino real de la bola sobre el tablero,
+// en celdas. Ver rayCast().
+const RAY_SAG = 0.02;
+
+// Recorre el vuelo del frame en coordenadas de grid. Devuelve el impacto —la
 // primera celda jugable y ocupada— junto con la última libre atravesada, o null
 // si el vuelo sigue. La ausencia de celda libre en el impacto es la condición de
 // muerte. El recorrido se rehace entero cada frame: lo único que sobrevive de un
 // frame al siguiente es `b.free`, y solo como red de seguridad revalidada —ver
 // stale()—, nunca como respuesta directa.
+//
+// Lo que se recorre es el camino de la bola RELATIVO AL TABLERO, que es donde
+// viven las celdas. Con el tablero girando ese camino es un arco, no una recta,
+// y el error de trazarlo como cuerda crece con el cuadrado del giro del frame:
+// su flecha es r·(1−cos(φ/2)). El giro por frame no tiene tope —un arrastre
+// rápido pasa de 50°, y un frame largo descarga de golpe todo el retraso del
+// tween—, y con 20° en el borde la cuerda ya se mete 0.12 celdas: la bola
+// moría contra el borde del montón estando todavía fuera del campo, o aterrizaba
+// en una celda por la que nunca pasó. Así que el camino se trocea, y el número
+// de trozos no es un umbral de velocidad sino lo que exige que ninguna cuerda
+// se separe del arco más de RAY_SAG. Con 0.02 el teclado a 60 fps no llega a
+// partir en ningún radio de vuelo: en juego normal es un solo trozo.
 function rayCast(b){
-  // El origen se convierte con el ángulo del frame ANTERIOR, que es el que el
+  const dA = angle - anglePrev;
+  const rc = Math.max(Math.hypot(b.px,b.py), Math.hypot(b.x,b.y))/CELL_PS;
+  const phiMax = 2*Math.acos(Math.max(-1, 1 - RAY_SAG/rc));
+  const n = Math.max(1, Math.ceil(Math.abs(dA)/phiMax));
+  // los extremos del frame, exactos: un solo trozo es el trazado de siempre
+  const at = u => u===0 ? [b.px, b.py, anglePrev]
+                : u===1 ? [b.x, b.y, angle]
+                : [b.px+(b.x-b.px)*u, b.py+(b.y-b.py)*u, anglePrev+dA*u];
+  for (let i=0; i<n; i++){
+    const s = raySeg(b, ...at(i/n), ...at(i===n-1 ? 1 : (i+1)/n));
+    if (s) return s;
+  }
+  return null;
+}
+
+// Un trozo: [x0,y0] en mundo con el tablero a `a0` → [x1,y1] con el tablero a `a1`.
+function raySeg(b, x0, y0, a0, x1, y1, a1){
+  // El origen se convierte con el ángulo del INICIO del trozo, que es el que el
   // tablero tenía cuando la bola estaba ahí. Con los dos extremos convertidos con
   // el mismo ángulo el barrido tangencial del giro se cancelaba solo y el rayo no
   // lo veía: a 340°/s en el borde son 0.72 celdas por frame contra las 0.052 que
   // avanza la bola por sí misma —14 veces más—, así que el montón le pasaba por
   // delante sin tocarla y encallaba a media celda de donde se la veía chocar.
-  // La cuerda basta y no hay que subdividirla: la flecha del arco que sustituye
-  // es de 0.011 celdas a 60 fps y de 0.10 en el peor caso, 20 fps a tope de giro.
-  const [ac0,ar0] = worldToCellA(b.px, b.py, anglePrev);
-  const [bc,br]   = worldToCellF(b.x,  b.y);
+  const [ac0,ar0] = worldToCellA(x0, y0, a0);
+  const [bc,br]   = worldToCellA(x1, y1, a1);
   // ...y se prolonga hacia atrás sobre la misma recta. La bola viene de ahí en
   // línea recta, o sea que son celdas que recorrió de verdad, y volver a trazarlas
   // cada frame es lo que permite calcular `free` ENTERO contra el grid vivo. Antes

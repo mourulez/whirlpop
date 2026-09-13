@@ -45,6 +45,9 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 - Se avanza a mano con `frame(now)` y `dt` fijo, con `Math.random` sembrado.
 - La ventana se simula redefiniendo `innerWidth`/`innerHeight` y llamando a
   `resize()`.
+- El input se simula despachando `PointerEvent`/`KeyboardEvent` reales, con
+  `performance.now` redefinido al reloj virtual: el arrastre mide con él.
+  Una partida entera dibujando cada frame tarda ~20 s: lanzar lotes en segundo plano.
 - El resultado sale por `--dump-dom`. `--screenshot` saca el canvas en negro:
   para verlo, `draw()` y volcar `cv.toDataURL()` al DOM.
 - Perfil nuevo por ejecución (`--user-data-dir`): el guardado de `localStorage`
