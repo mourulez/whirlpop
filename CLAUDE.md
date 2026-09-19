@@ -41,6 +41,9 @@ orientativo: 80 líneas.
 - La cascada se premia con un solo `+N` que crece y engorda en cada eslabón, sin
   rótulo de multiplicador ni resumen aparte: los textos suman siempre lo que
   sube el marcador.
+- La bola que no cabe se juzga antes de morir (hueco liberado o match desde
+  fuera), pero solo espera una a la vez: sin cola. La espera dura un destello y
+  en 16.000 partidas no llegó nunca una segunda; si llega, muere sin juicio.
 
 ## Verificación
 
@@ -57,6 +60,8 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 - El input se simula despachando `PointerEvent`/`KeyboardEvent` reales, con
   `performance.now` redefinido al reloj virtual: el arrastre mide con él.
   Una partida entera dibujando cada frame tarda ~20 s: lanzar lotes en segundo plano.
+  Si no hace falta ver nada, `draw = function(){}` baja a ~1000 partidas en
+  segundos por instancia de Chrome, y varias en paralelo.
 - El resultado sale por `--dump-dom`. `--screenshot` saca el canvas en negro:
   para verlo, `draw()` y volcar `cv.toDataURL()` al DOM.
 - Perfil nuevo por ejecución (`--user-data-dir`): el guardado de `localStorage`

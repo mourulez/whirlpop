@@ -880,6 +880,16 @@ function raySeg(b, x0, y0, a0, x1, y1, a1){
       if (grid[idx(c,r)]){
         // se sale de la celda después de `t0`: la bola está aquí o llega aquí
         if (Math.min(tc,tr) > t0){
+          // Sin `slot` la bola ya está DENTRO de una celda ocupada: otra aterrizó
+          // en la celda por la que volaba —el grid no ve las bolas en vuelo— y su
+          // rastro de atrás no la saca, porque con el tablero girando corre de lado
+          // y cruza el montón. Hace snap en la celda no ocupada más cercana a
+          // donde está: si es una libre del campo aterriza ahí; si no, es la de
+          // fuera desde la que se la juzga. Así toda bola sin hueco tiene snap.
+          if (!slot){
+            slot = nearestOpen(ac+dc*t0, ar+dr*t0);
+            if (playable(slot[0],slot[1])) free = slot;
+          }
           // punto de ENTRADA en la celda: es donde la bola la toca, y de ahí sale
           // la posición visual desde la que la ficha se asienta hacia el centro.
           return { hit:[c,r], free:free||stale(b), slot, fc:ac+dc*tin, fr:ar+dr*tin,
@@ -906,6 +916,18 @@ function raySeg(b, x0, y0, a0, x1, y1, a1){
 function stale(b){
   const f = b.free;
   return f && playable(f[0],f[1]) && !grid[idx(f[0],f[1])] ? f : null;
+}
+
+// Celda no ocupada —libre del campo, o muro o exterior— más cercana a un punto
+// en celdas. El anillo de fuera del array cuenta: el borde del disco está ahí.
+function nearestOpen(pc, pr){
+  let best = null, bd = Infinity;
+  for (let r=-1; r<=N; r++) for (let c=-1; c<=N; c++){
+    if (playable(c,r) && grid[idx(c,r)]) continue;
+    const d = (c-pc)*(c-pc) + (r-pr)*(r-pr);
+    if (d < bd){ bd = d; best = [c,r]; }
+  }
+  return best;
 }
 
 // distancia de un centro de celda a la recta del rayo, en celdas
@@ -937,13 +959,7 @@ function land(b, s){
   // impactó sin haber tenido nunca una celda libre dentro del campo: no cabe.
   // Es la única muerte del juego, y es la misma en todas las direcciones.
   if (!cell){
-    // ...salvo que desde donde hace snap cierre un match. Ver settleOut().
-    if (s.slot && !outBall){
-      outBall = { k:b.k, vc:s.slot[0], vr:s.slot[1], hit:s.hit };
-      settleOut();
-      return;
-    }
-    // La bola que mata NO desaparece: sale de `flying` como cualquier otra —el
+    // La bola que no cabe NO desaparece: sale de `flying` como cualquier otra —el
     // vuelo ha terminado— pero se queda dibujada. Sin esto el último fotograma
     // enseña un game over sin causa a la vista.
     //
@@ -954,16 +970,20 @@ function land(b, s){
     // y esa es exactamente la definición de "no cabe". Por eso no hace falta
     // comprobar nada: si `slot` fuese del campo y estuviese libre, `free` no sería
     // null y no habría muerte. Cae fuera por construcción, en todas las
-    // direcciones y gire el tablero lo que gire.
+    // direcciones y gire el tablero lo que gire. raySeg() garantiza que existe.
     //
     // El cálculo anterior —una celda hacia atrás sobre el vector del rayo— dejaba
     // la bola fuera de la rejilla y dependía de una dirección que, desde que el
     // rayo ve el giro, es la relativa y no la suya: girando la ponía AL LADO del
     // montón en vez de por fuera, y en un 11% de las muertes encima de una casilla
     // libre, que se lee "pero si cabía".
-    dead = true;
-    deadBall = s.slot ? { k:b.k, vc:s.slot[0], vr:s.slot[1] }
-                      : { k:b.k, vc:s.fc, vr:s.fr };
+    const o = { k:b.k, vc:s.slot[0], vr:s.slot[1], hit:s.hit };
+    // Antes de morir se la juzga: puede cerrar un match desde fuera. Ver settleOut().
+    // Solo espera una a la vez; la que llega mientras otra espera muere sin juicio.
+    // En 16.000 partidas sembradas no ha pasado nunca: la espera dura lo que un
+    // destello, y en ese rato no llega otra bola sin hueco.
+    if (outBall) gameOver(o);
+    else { outBall = o; settleOut(); }
     return;
   }
   place(b.k, cell, s.fc, s.fr);
@@ -1041,6 +1061,11 @@ function settleOut(){
   comboDepth = 0;
   if (tryMatch()) return;
   outBall = null;
+  gameOver(o);
+}
+
+// La única muerte del juego. `o` es la bola que no cabe, ya con su snap.
+function gameOver(o){
   dead = true;
   deadBall = { k:o.k, vc:o.vc, vr:o.vr };
 }
