@@ -120,9 +120,8 @@ const FALL_ACCEL   = 0.065;                 // aceleración durante la caída
 const HARD_SPEED   = 0.95;                  // velocidad mínima tras hard drop
 const HARD_ACCEL   = 0.55;                  // y sigue acelerando más fuerte
 const SPIRAL_TANGENT = 2.1, SPIRAL_INWARD = 0.085;
-// las blancas son una entidad independiente: su propio reloj, su propia velocidad
-const WHITE_INT_START = 14, WHITE_INT_MIN = 7.0, WHITE_INT_RAMP = 340;
-const WHITE_SPEED = 0.115, WHITE_ACCEL = 0.035;
+// las blancas tienen su propio reloj, pero caen como las de color
+const WHITE_INT_START = 8, WHITE_INT_MIN = 4.0, WHITE_INT_RAMP = 340;
 const WHITE_SPREAD = 50 * Math.PI/180;   // dispersión alrededor del punto opuesto
 const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
 const TELEGRAPH = 1.25;                     // aviso previo a la salida de cada ficha
@@ -216,7 +215,7 @@ const LEVELS = [
   // encima de 34 hay que devolverle allí la guarda.
   { n:2, id:"stone",  at:19,  tip:"Si tardas, la bola se vuelve piedra y ya no estalla. El anillo gris avisa." },
   // el tutorial de las blancas llega con una blanca ya en camino: se lee el texto
-  // mirando la cosa de la que habla, no esperando 14 s a que aparezca sola.
+  // mirando la cosa de la que habla, no esperando 8 s a que aparezca sola.
   { n:3, id:"white",  at:50,  on(){ spawnWhite(); whiteT = whiteInterval(); },
                       tip:"Las bolas blancas estallan con cualquier match que las toque." },
   // Puesta en escena, no mecánica: el anillo aparece de golpe y barriendo hasta
@@ -668,7 +667,7 @@ function spawnSine(n){
                 sine:{ s:d, s0:d, ex, ey, sig:n.sig,
                        A, w, cal:sineCal(A, w, d) } });
 }
-// blanca: sin aviso, más lenta, inmune al hard drop.
+// blanca: sin aviso, inmune al hard drop.
 // Sale en el lado opuesto a la última ficha de color, para partir la atención.
 function spawnWhite(){
   const base = (lastColorAngle===null ? Math.random()*Math.PI*2 : lastColorAngle) + Math.PI;
@@ -677,8 +676,8 @@ function spawnWhite(){
   const x = Math.cos(a)*d, y = Math.sin(a)*d;
   flying.push({ bonus:false, k:WHITE, hard:false, trail:[],
                 x, y, px:x, py:y,
-                ux:-Math.cos(a), uy:-Math.sin(a), sp:WHITE_SPEED,
-                acc:WHITE_ACCEL });
+                ux:-Math.cos(a), uy:-Math.sin(a), sp:BUBBLE_SPEED,
+                acc:FALL_ACCEL });
 }
 // sale por el punto de anclaje del anillo, donde el arco acaba de cerrarse:
 // el medidor y su premio comparten sitio, no solo momento.
@@ -847,7 +846,7 @@ function raySeg(b, x0, y0, a0, x1, y1, a1){
   // línea recta, o sea que son celdas que recorrió de verdad, y volver a trazarlas
   // cada frame es lo que permite calcular `free` ENTERO contra el grid vivo. Antes
   // se arrastraba de un frame al siguiente, y dos bolas que compartieran celda en
-  // vuelo —una blanca lenta alcanzada por una de color, cosa fácil con el tablero
+  // vuelo —una blanca alcanzada por una de color en hard drop, cosa fácil con el tablero
   // vacío— anotaban las dos la misma celda libre: la segunda en aterrizar escribía
   // encima de la primera y una de las dos desaparecía. Ahora la segunda ve la
   // celda ocupada y se queda en la de detrás, que es justo donde está.
