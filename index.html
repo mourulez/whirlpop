@@ -171,10 +171,13 @@ const TELE_HALO_W = 0.085;       // resplandor del aviso: fuera de la progresió
 const GAUGE_A0    = Math.PI;     // ancla: 9 en punto
 const GAUGE_TWEEN = 11;          // seguimiento del valor visual hacia el lógico
 const GAUGE_FLASH = 0.22;        // destello del anillo cerrado, en segundos
-// carga de salida al abrir el nivel 4, sobre 4: el anillo nace casi cerrado para
-// que el premio quede a un match de distancia y se vea para qué sirve. Un cuarteto
-// (0.55) lo cierra de una; a base de tríos (0.17) hacen falta tres.
-const GAUGE_INTRO = 3.6;
+// El anillo se llena con los mismos puntos que suma el marcador: lo que el jugador
+// ve flotar es lo que avanza el aro, combo incluido. Capacidad: 24 tríos.
+const GAUGE_MAX   = 360;
+// carga de salida al abrir el nivel 4: el anillo nace casi cerrado para que el
+// premio quede a un match de distancia y se vea para qué sirve. Un cuarteto (40)
+// lo cierra de una; a base de tríos (15) hacen falta tres.
+const GAUGE_INTRO = 324;
 const GAUGE_TRACK = "#2a2e4a";
 const GAUGE_FILL  = "#ffa06b";
 // alerta de muerte. No comparte familia ni con el gauge — que sería concéntrico
@@ -1157,24 +1160,12 @@ function tryMatch(){
 // llamada tras un aterrizaje: arranca una resolución nueva, combo a cero
 function resolve(){ if (flashT > 0) return; comboDepth = 0; tryMatch(); }
 
-// Carga del medidor por grupo. Muy superlineal: a base de tríos cuesta muchísimo,
-// con cuartetos y quintetos el bonus llega en un momento.
-function gaugeForSize(n){
-  if (n <= 3) return 0.17;      // ~24 tríos para llenar el medidor
-  if (n === 4) return 0.55;     // ~8
-  if (n === 5) return 1.15;     // ~4
-  if (n === 6) return 1.80;
-  return 1.80 + 0.55*(n-6);
-}
-// Multiplicador de puntuación por tamaño del grupo
-function scoreMultForSize(n){
-  if (n <= 3) return 1;
-  if (n === 4) return 1.6;
-  if (n === 5) return 2.4;
-  return 3.2 + 0.8*(n-6);
-}
+// Multiplicador de puntuación por tamaño del grupo: uno más por cada bola sobre
+// el mínimo (trío ×1, cuarteto ×2, quinteto ×3...). Entero, como el de combo:
+// con base 5 toda puntuación acaba en 0 o 5 y no hay nada que redondear.
+function scoreMultForSize(n){ return Math.max(1, n - (CHAIN_MIN-1)); }
 // Multiplicador de combo: 1ª, 2ª, 3ª... cadena de la misma resolución
-const COMBO_MULT = [1, 1.9, 3.2, 4.8, 6.5, 8.5];
+const COMBO_MULT = [1, 2, 3, 5, 7, 9];
 function comboMult(){ return COMBO_MULT[Math.min(comboDepth, COMBO_MULT.length-1)]; }
 
 function commitFlash(){
@@ -1194,12 +1185,12 @@ function commitFlash(){
         if (g && g.k>=0 && g.k!==WHITE && g.k!==STONE){ tone = COL[g.k]; break; }
       }
       const n = comp.length;
-      const pts = Math.round(n * 5 * scoreMultForSize(n) * cm);
-      addFloater(comp, pts, tone, comboDepth>0 ? "x"+cm.toFixed(1).replace(/\.0$/,"")+" COMBO" : null);
+      const pts = n * 5 * scoreMultForSize(n) * cm;
+      addFloater(comp, pts, tone, comboDepth>0 ? "x"+cm+" COMBO" : null);
       score += pts;
       // sin carga disponible los matches puntúan igual pero no cargan nada: el
       // anillo aparece a cero cuando abre, sin arrastre de lo anterior.
-      if (gaugeOn()) gauge = Math.min(4, gauge + gaugeForSize(n)*cm);
+      if (gaugeOn()) gauge = Math.min(GAUGE_MAX, gauge + pts);
     }
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
     if (flashSet.has(OUT)) outBall = null;
@@ -1548,7 +1539,7 @@ function drawGauge(){
   cx.strokeStyle = GAUGE_TRACK;
   cx.beginPath(); cx.arc(ox,oy,gaugeRad,0,7); cx.stroke();
 
-  const p = Math.max(0, Math.min(1, gaugeV/4));
+  const p = Math.max(0, Math.min(1, gaugeV/GAUGE_MAX));
   if (p > 0.002){
     // horario desde las 9: pasa por arriba y cierra en el punto de partida
     cx.strokeStyle = GAUGE_FILL;
@@ -1795,8 +1786,8 @@ function frame(now){
     gaugeV += (gauge - gaugeV)*Math.min(1, GAUGE_TWEEN*dt);
     if (gaugeFlashT > 0) gaugeFlashT -= dt;
     // el bonus espera a que el arco haya cerrado el anillo, no a que el contador
-    // llegue a 4: disparar con gaugeV a medias rompe la relación que busca el aro.
-    if (gaugeOn() && gauge >= 4 && gaugeV >= 3.97){
+    // llegue al tope: disparar con gaugeV a medias rompe la relación que busca el aro.
+    if (gaugeOn() && gauge >= GAUGE_MAX && gaugeV >= GAUGE_MAX-3){
       gaugeFlashT = GAUGE_FLASH;
       spawnBonus(4);
       gauge = 0;                 // gaugeV baja sola: el anillo se vacía barriendo

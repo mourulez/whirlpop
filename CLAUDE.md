@@ -35,6 +35,9 @@ orientativo: 80 líneas.
   aviso, y ya con su velocidad normal. Si una spec propone sacarlas desde fuera
   de pantalla o con una fase de entrada, se descarta: el arco ya anticipa de
   dónde vienen.
+- Puntuación sin decimales, ni en la lógica ni en pantalla: multiplicadores
+  enteros (tamaño y combo). El anillo se llena con los mismos puntos que suma el
+  marcador; no tiene una tabla de carga propia.
 
 ## Verificación
 
