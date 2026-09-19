@@ -127,15 +127,20 @@ const WHITE_SPREAD = 50 * Math.PI/180;   // dispersión alrededor del punto opue
 const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
 const TELEGRAPH = 1.25;                     // aviso previo a la salida de cada ficha
 const TELEGRAPH_ARC = 35 * Math.PI/180;     // amplitud del aviso
-// Sinusoide: no es un tipo de ficha, es otra forma de llegar. Entra por el
-// lateral (3 o 9 en punto) y cruza el círculo serpenteando hasta el centro.
-// SINE_AMP > R_FACTOR a propósito: mantiene TODOS los giros de la onda fuera del
-// campo jugable, donde su curvatura cerradísima no puede colarse entre los dos
-// extremos del segmento que traza rayCast() en un frame. Tope duro en ~0.60: por encima, el punto más lejano de
-// la trayectoria pasa del descarte de stepFlying() (0.75) y la bola se
-// borraría sola en pleno vuelo. SINE_SPEED es velocidad sobre la trayectoria,
-// no sobre el eje: mismo ritmo aparente en los tramos verticales.
-const SINE_AMP = 0.55, SINE_SPEED = 0.67;
+// Sinusoide: no es un tipo de ficha, es otra forma de llegar. Entra por un eje
+// cardinal y cruza el círculo serpenteando hasta el centro: la de vaivén vertical
+// por las 3 o las 9 (nivel 6), la de vaivén horizontal por las 12 o las 6 (nivel 7).
+// Las dos comparten amplitud, y SINE_AMP vive en una ventana estrecha:
+//  - por debajo, la esquina de celda jugable más lejana (0.4674): mantiene TODOS
+//    los giros de la onda fuera del campo, donde su curvatura cerradísima podría
+//    esquivar celdas. Aun así, cerca del borde la cuerda de un frame se separa
+//    de la curva, y rayCast() la trocea siguiéndola (ver allí).
+//  - por encima, medio ancho de columna menos el radio de bola (0.4734): en
+//    móvil vertical el ancho es exactamente PS, y la cresta horizontal debe
+//    verse entera. Con 0.55 la bola desaparecía del todo justo donde más frena.
+// SINE_SPEED es velocidad sobre la trayectoria, no sobre el eje: mismo ritmo
+// aparente en los tramos de vaivén.
+const SINE_AMP = 0.47, SINE_SPEED = 0.67;
 const SINE_MAX_STEP = 0.02;   // avance máximo por subpaso de integración, múltiplo de PS
 // Cómo se reparte la velocidad a lo largo de la onda:
 //   1 = constante sobre la TRAYECTORIA. Ritmo plano; no frena en las crestas.
@@ -231,9 +236,13 @@ const LEVELS = [
   // Misma reserva que el morado, y por la misma razón: la primera sinusoide no
   // puede depender de un 0.12. `forceSine` se salta el filtro de `prevSine`
   // —el tutorial manda— y el re-pick solo entra si el aviso todavía no se pinta.
-  { n:6, id:"sine",   at:175, on(){ forceSine = true; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
+  { n:6, id:"sine",   at:175, on(){ forceSine = "v"; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
                       tip:"Hay bolas que no caen. Cruzan el tablero de lado a lado." },
-  { n:7, id:"pink",   at:220, tip:"Nueva bola: rosa." },
+  // Otro eje, no otra cantidad: el nivel 7 reparte las mismas sinusoides entre
+  // los dos vaivenes (ver pickNext()), y reserva la primera horizontal.
+  { n:7, id:"sineH",  at:220, on(){ forceSine = "h"; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
+                      tip:"Y también de arriba abajo." },
+  { n:8, id:"pink",   at:265, tip:"Nueva bola: rosa." },
 ];
 // Intervalo entre blancas: se acorta con la partida, pero la rampa cuenta desde
 // que abrió el nivel 3, no desde t=0. En el propio instante de abrir vale
@@ -242,7 +251,8 @@ function whiteInterval(){
   return WHITE_INT_MIN + (WHITE_INT_START-WHITE_INT_MIN)*
          Math.exp(-(t-LEVELS[2].at)/WHITE_INT_RAMP*1.6);
 }
-// Proporción de fichas que llegan serpenteando en vez de cayendo. Misma forma y
+// Proporción de fichas que llegan serpenteando en vez de cayendo, sumando los dos
+// vaivenes: el nivel 7 no la sube, la reparte. Misma forma y
 // misma razón que whiteInterval(): la rampa cuenta desde que abrió el nivel 6,
 // así que en el instante de abrir vale exactamente SINE_P_START. El tope de 0.30
 // es el punto del diseño —la bajada radial es el core y sigue siendo mayoría
@@ -480,7 +490,7 @@ function reset(){
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
   angle = angleT = anglePrev = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
   spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; deadBall = outBall = null; lastColorAngle = null;
-  forceK = null; prevSine = false; forceSine = false;
+  forceK = null; prevSine = false; forceSine = null;
   // arranque en un nivel concreto (?nivel=N): toda la dificultad se deriva de
   // `t`, así que basta con adelantar el reloj. La progresión se encadena sola en
   // el primer frame, ejecutando cada on() intermedio en orden.
@@ -580,17 +590,23 @@ function pickNext(){
   forceK = null;
   // La sinusoide SUSTITUYE a la radial, no se suma: mismo ritmo de fichas, otra
   // trayectoria para algunas. Nunca dos seguidas —el veto quita las rachas y deja
-  // el 0.30 nominal en ~0.23 efectivo—, salvo que la pida el tutorial.
-  const sine = forceSine || (!prevSine && level >= 6 && Math.random() < sineChance());
-  forceSine = false;
-  prevSine = sine;
-  if (sine){
-    // Entrada exactamente a las 3 o a las 9, sin dispersión dentro del arco: la
-    // onda se define respecto al centro y hacen falta ciclos enteros entre
+  // el 0.30 nominal en ~0.23 efectivo—, salvo que la pida el tutorial. `sway` es
+  // el vaivén: "v" entra por los lados, "h" por arriba o por abajo. Desde el
+  // nivel 7 va a medias, y ese azar solo se tira entonces: por debajo, la
+  // secuencia de Math.random() es la de antes de existir la horizontal.
+  let sway = forceSine;
+  if (!sway && !prevSine && level >= 6 && Math.random() < sineChance())
+    sway = level >= 7 && Math.random() < 0.5 ? "h" : "v";
+  forceSine = null;
+  prevSine = !!sway;
+  if (sway){
+    // Entrada exactamente sobre un eje cardinal, sin dispersión dentro del arco:
+    // la onda se define respecto al centro y hacen falta ciclos enteros entre
     // entrada y centro para que la bola nazca sobre el eje. Cualquier desvío
-    // rompe una de las dos cosas. El eje horizontal tampoco es estético:
-    // inclinarlo sacaría la cresta más lejana de la pantalla por el lado.
-    const a = Math.random()<0.5 ? 0 : Math.PI;
+    // rompe una de las dos cosas. Los ejes cardinales tampoco son estéticos: en
+    // diagonal la cresta más lejana se saldría de la pantalla por el lado.
+    const a = sway === "v" ? (Math.random()<0.5 ? 0 : Math.PI)
+                           : (Math.random()<0.5 ? -Math.PI/2 : Math.PI/2);
     return { aArc:a, a, k, sine:true,
              cyc: 2 + Math.floor(Math.random()*2),
              sig: Math.random()<0.5 ? 1 : -1 };
@@ -631,15 +647,25 @@ function sineCal(A, w, d){
   }
   return ie/i1;
 }
+// El eje `ex,ey` es cardinal y se redondea: con cos(π) = −1 pero sin(π) = 1e-16,
+// sin redondeo el vaivén vertical arrastraría un residuo en y. El vaivén va en la
+// perpendicular, sin signo —de eso se encarga `sig`—, así que la bola es `eje·s +
+// perp·A·sin(w·s)` para los dos vaivenes, y todo lo demás (integración en `s`,
+// calibrado, hard drop, nodo en el centro) no sabe cuál es.
+function sineAt(q, s){
+  const o = q.sig*q.A*Math.sin(q.w*s);
+  return [q.ex*s + Math.abs(q.ey)*o, q.ey*s + Math.abs(q.ex)*o];
+}
 function spawnSine(n){
   const a = n.a, d = 0.52;
-  const x = Math.cos(a)*d, y = 0;
+  const ex = Math.round(Math.cos(a)), ey = Math.round(Math.sin(a));
+  const x = ex*d, y = ey*d;
   const A = SINE_AMP, w = Math.PI*n.cyc/d;
   lastColorAngle = a;                      // las blancas siguen saliendo enfrente
   flying.push({ bonus:false, k:n.k, hard:false, trail:[],
                 x, y, px:x, py:y,
                 sp:SINE_SPEED, acc:0,      // la sinusoide no cae: cruza
-                sine:{ s:d, sx:Math.cos(a)<0 ? -1 : 1, sig:n.sig,
+                sine:{ s:d, s0:d, ex, ey, sig:n.sig,
                        A, w, cal:sineCal(A, w, d) } });
 }
 // blanca: sin aviso, más lenta, inmune al hard drop.
@@ -694,6 +720,7 @@ function stepFlying(dt){
         // en el eje: con SINE_EASE bajo la bola vuela en los cruces y ahí es
         // donde hay que muestrear fino.
         const q = b.sine, rate = b.sp*q.cal;
+        q.s0 = q.s;                                   // origen del rayo, en la onda
         const h0 = Math.hypot(1, q.A*q.w*Math.cos(q.w*q.s));
         const disp = rate*dt*Math.pow(h0, 1-SINE_EASE);
         const n = Math.max(1, Math.ceil(disp/SINE_MAX_STEP));
@@ -712,8 +739,7 @@ function stepFlying(dt){
         // pasa por el núcleo aunque el frame lo cruce. El peor avance ahí es de
         // 0.39 celdas (hard drop a 20 fps), y un barrido de 60 combinaciones de
         // variante, framerate, hard drop y desfase no rebasa el centro ni una vez.
-        b.x = q.sx*q.s;
-        b.y = q.sig*q.A*Math.sin(q.w*q.s);
+        [b.x, b.y] = sineAt(q, q.s);
       } else {
         b.x += b.ux*b.sp*dt; b.y += b.uy*b.sp*dt;
       }
@@ -779,14 +805,26 @@ const RAY_SAG = 0.02;
 // de trozos no es un umbral de velocidad sino lo que exige que ninguna cuerda
 // se separe del arco más de RAY_SAG. Con 0.02 el teclado a 60 fps no llega a
 // partir en ningún radio de vuelo: en juego normal es un solo trozo.
+// La sinusoide curva el camino también en el mundo, y por la misma regla se
+// trocea: con la cresta justo fuera del campo (ver SINE_AMP), un hard drop a 20
+// fps separaba la cuerda de la onda 0.07 celdas junto al borde. Los trozos salen
+// de la onda, no de la cuerda, con el mismo tope de separación. La cota es la de
+// la cresta —la peor fase—, así que en los cruces sobra; a 60 fps sigue siendo
+// un solo trozo, también con hard drop.
 function rayCast(b){
   const dA = angle - anglePrev;
   const rc = Math.max(Math.hypot(b.px,b.py), Math.hypot(b.x,b.y))/CELL_PS;
   const phiMax = 2*Math.acos(Math.max(-1, 1 - RAY_SAG/rc));
-  const n = Math.max(1, Math.ceil(Math.abs(dA)/phiMax));
+  let n = Math.max(1, Math.ceil(Math.abs(dA)/phiMax));
+  const q = b.sine;
+  if (q){
+    const wMax = 2*Math.acos(Math.max(-1, 1 - RAY_SAG*CELL_PS/q.A));
+    n = Math.max(n, Math.ceil(q.w*Math.abs(q.s - q.s0)/wMax));
+  }
   // los extremos del frame, exactos: un solo trozo es el trazado de siempre
   const at = u => u===0 ? [b.px, b.py, anglePrev]
                 : u===1 ? [b.x, b.y, angle]
+                : q ? [...sineAt(q, q.s0 + (q.s-q.s0)*u), anglePrev+dA*u]
                 : [b.px+(b.x-b.px)*u, b.py+(b.y-b.py)*u, anglePrev+dA*u];
   for (let i=0; i<n; i++){
     const s = raySeg(b, ...at(i/n), ...at(i===n-1 ? 1 : (i+1)/n));
