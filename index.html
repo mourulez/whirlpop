@@ -474,7 +474,7 @@ const DEPTH = new Int8Array(N*N);
 
 function reset(){
   grid = new Array(N*N).fill(null);
-  floaters = [];
+  floaters = []; cascadeF = null;
   flashT = 0; flashSet = new Set(); flashBonus = false;
   pendingBonus = null;
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
@@ -1170,6 +1170,8 @@ function comboMult(){ return COMBO_MULT[Math.min(comboDepth, COMBO_MULT.length-1
 
 function commitFlash(){
   const cm = comboMult();
+  const chained = comboDepth > 0 && cascadeF;
+  let first = null;                  // texto del primer eslabón, por si hay cadena
 
   if (flashBonus){
     const pts = flashSet.size*5;
@@ -1177,7 +1179,8 @@ function commitFlash(){
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
     score += pts;
   } else {
-    // puntuación y carga se calculan POR GRUPO, no sobre el total
+    // puntuación y carga se calculan POR GRUPO, no sobre el total. En cascada
+    // los puntos no sacan texto propio: engordan el de la cadena (ver cascadeF)
     for (const comp of splitComponents(flashSet)){
       let tone = "#ffffff";
       for (const i of comp){
@@ -1186,7 +1189,8 @@ function commitFlash(){
       }
       const n = comp.length;
       const pts = n * 5 * scoreMultForSize(n) * cm;
-      addFloater(comp, pts, tone, comboDepth>0 ? "x"+cm+" COMBO" : null);
+      if (chained) cascadeF.pts += pts;
+      else { const f = addFloater(comp, pts, tone); if (!first) first = f; }
       score += pts;
       // sin carga disponible los matches puntúan igual pero no cargan nada: el
       // anillo aparece a cero cuando abre, sin arrastre de lo anterior.
@@ -1194,6 +1198,7 @@ function commitFlash(){
     }
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
     if (flashSet.has(OUT)) outBall = null;
+    if (chained){ cascadeF.links++; cascadeF.bump = 1; }
   }
 
   const wasBonus = flashBonus;
@@ -1210,6 +1215,10 @@ function commitFlash(){
   if (more) for (const i of flashSet) if (i===OUT || (grid[i] && grid[i].fresh)){ byFresh = true; break; }
   if (!more || byFresh) comboDepth = 0;
   else if (!wasBonus) comboDepth++;
+  // el texto se retiene en el mismo commit que lo crea, antes de dibujarse: la
+  // cadena ya se sabe aquí, así que un "+15" que va a crecer nunca se desvanece
+  if (more && !byFresh && !wasBonus){ if (!cascadeF){ cascadeF = first; cascadeF.held = true; } }
+  else if (cascadeF){ cascadeF.held = false; cascadeF = null; }
   // las marcas se consumen aquí: su destello ya se ha resuelto
   for (const g of grid) if (g && g.fresh) g.fresh = false;
 
@@ -1255,8 +1264,15 @@ function fireBonus(lv){
 }
 
 // ─── textos flotantes de puntuación ────────────────────────────────────────
-let floaters = [];
+// Un texto por grupo, salvo en cascada: el del primer eslabón se queda quieto
+// (`held`) y va sumando los siguientes, más grande en cada uno. Así los textos
+// suman siempre lo que sube el marcador —un "+45" nunca se añade a un "+15"— y
+// lo que crece se distingue de lo que se desvanece a la primera.
+let floaters = [], cascadeF = null;
 const FLOAT_LIFE = 1.15;
+const FLOAT_HOLD = FLOAT_LIFE*0.16;   // fin de la entrada: ahí espera el retenido
+const FLOAT_GROW = 0.25, FLOAT_GROW_MAX = 6;   // escala por eslabón, y hasta cuál
+const FLOAT_BUMP = 0.18;              // golpe de escala al sumar un eslabón, en s
 
 // centroide de un conjunto de celdas, en posición visual
 function popCentroid(cells){
@@ -1264,14 +1280,18 @@ function popCentroid(cells){
   for (const i of cells){ const [c,r] = cellOf(i); sc += c; sr += r; }
   return [sc/cells.length, sr/cells.length];
 }
-function addFloater(cells, pts, tone, label){
+function addFloater(cells, pts, tone){
   const [fc,fr] = popCentroid(cells);
-  floaters.push({ fc, fr, pts, tone, label:label||null, life:0, rise:0 });
+  const f = { fc, fr, pts, tone, life:0, rise:0, held:false, links:1, bump:0 };
+  floaters.push(f);
+  return f;
 }
 function stepFloaters(dt){
   for (let i=floaters.length-1;i>=0;i--){
     const f = floaters[i];
-    f.life += dt; f.rise += dt*1.05;               // `rise` en celdas: ver "conversiones"
+    f.life = f.held ? Math.min(f.life+dt, FLOAT_HOLD) : f.life+dt;
+    f.rise += dt*1.05;                             // `rise` en celdas: ver "conversiones"
+    f.bump = Math.max(0, f.bump - dt/FLOAT_BUMP);
     if (f.life > FLOAT_LIFE) floaters.splice(i,1);
   }
 }
@@ -1279,7 +1299,8 @@ function drawFloaters(){
   for (const f of floaters){
     const p = f.life/FLOAT_LIFE;
     const [x,y] = cellToScreen(f.fc, f.fr);
-    const scale = p<0.16 ? 0.55 + 0.45*(p/0.16)*1.35 : 1.12 - 0.12*p;
+    const grow = 1 + FLOAT_GROW*(Math.min(f.links, FLOAT_GROW_MAX)-1) + 0.3*f.bump;
+    const scale = (p<0.16 ? 0.55 + 0.45*(p/0.16)*1.35 : 1.12 - 0.12*p) * grow;
     cx.save();
     cx.globalAlpha = p<0.72 ? 1 : 1-(p-0.72)/0.28;
     cx.translate(x, y - f.rise*CELL);
@@ -1291,13 +1312,6 @@ function drawFloaters(){
     cx.strokeText("+"+f.pts, 0, 0);
     cx.fillStyle = f.tone;
     cx.fillText("+"+f.pts, 0, 0);
-    if (f.label){
-      cx.font = `700 ${Math.round(CELL*0.52)}px ui-monospace, Menlo, Consolas, monospace`;
-      cx.lineWidth = Math.max(2, CELL*0.10);
-      cx.strokeText(f.label, 0, CELL*0.82);
-      cx.fillStyle = "#f2c53d";
-      cx.fillText(f.label, 0, CELL*0.82);
-    }
     cx.restore();
   }
 }

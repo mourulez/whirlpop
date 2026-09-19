@@ -38,6 +38,9 @@ orientativo: 80 líneas.
 - Puntuación sin decimales, ni en la lógica ni en pantalla: multiplicadores
   enteros (tamaño y combo). El anillo se llena con los mismos puntos que suma el
   marcador; no tiene una tabla de carga propia.
+- La cascada se premia con un solo `+N` que crece y engorda en cada eslabón, sin
+  rótulo de multiplicador ni resumen aparte: los textos suman siempre lo que
+  sube el marcador.
 
 ## Verificación
 
