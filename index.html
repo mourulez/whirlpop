@@ -137,6 +137,55 @@ const SPIRAL_TANGENT = 2.1, SPIRAL_INWARD = 0.085;
 // enderezaría la entrada, que es otra cosa: la espiral dejaría de serlo al final.
 const SPIRAL_BRAKE_R = 0.25;   // radio donde empieza a frenar, en mundo
 const SPIRAL_BRAKE   = 0.45;   // suelo del ritmo, fracción del de fuera
+// Dos bonus que se alternan: cada cierre del anillo entrega uno y deja cargado el
+// otro, y el relleno del aro lo anuncia mientras se carga (ver drawGauge). Todo lo
+// que los distingue vive en esta tabla —color de la bola, relleno del anillo que la
+// promete y celdas que revienta—, así que lanzarlos, cobrarlos y dibujarlos es el
+// mismo código para los dos. Comparten vuelo, puntuación (5 por celda), el ×4 de
+// barrido limpio y el no cargar el anillo: lo único que cambia es la forma del
+// cráter. `blast` recibe la celda del MONTÓN contra la que choca la bola —el bonus
+// no ocupa celda, y centrar el cráter donde la bola quedaría en reposo, pegada por
+// fuera, tiraría medio molde fuera del tablero— y devuelve el criterio de qué cae.
+// El núcleo se salva siempre, en fireBonus().
+//
+// Los dos valen casi lo mismo, y no por casualidad de diseño sino medido: en 24
+// lanzamientos desde el mismo tablero (semillas 1-10, tres momentos, el anillo a
+// cero durante el rodaje para que el montón crezca) el naranja da 47 puntos de
+// media y el turquesa 55. Lo que los separa es la varianza: el naranja va de 5 a
+// 140 y el turquesa de 30 a 100. Cuidado con leer "arrasa el tablero" del naranja:
+// eso solo pasa si llega al núcleo, y con el montón crecido choca antes, en el
+// anillo 4,4 de media, así que "de ese marco hacia fuera" son 9,4 celdas —la orla—
+// porque la gravedad apelotona las bolas en el centro. Medido sin tocar el input:
+// un jugador que gira y mantiene el montón limpio empuja el naranja hacia dentro
+// y ahí sí vuelve a barrer entero, que es su techo y no su caso normal.
+const BOMB_R = 3.2, BOMB_R2 = BOMB_R*BOMB_R;
+const BONUS = [
+  // Naranja: el marco de la celda impactada y todos los exteriores.
+  { col:"#f26b3a", fill:"#ffa06b",
+    blast(c,r){
+      const lv = Math.max(1, cheb(c,r));          // nunca arrasa desde el núcleo
+      return (q,s) => cheb(q,s) >= lv;
+    } },
+  // Turquesa: bomba local, un disco de radio 3 alrededor del impacto. El molde es
+  // euclídeo y no Chebyshev —la métrica de los anillos— porque una bomba se lee
+  // redonda, como el propio tablero; el 3.2 recoge las celdas a (1,3), que a 3.0
+  // justo se quedaban fuera: 37 celdas de molde contra 29, y 30 efectivas de media
+  // dentro del disco jugable. Se lleva 11 celdas de media, más que el naranja, y
+  // encima abre el agujero DENTRO del montón: el colapso hacia el centro enciende
+  // una cascada que sí cobra combo (ver `wasBonus` en commitFlash).
+  //
+  // Contra la piedra es el único de los dos que hace algo: 3,2 piedras por
+  // lanzamiento contra 0,4 del naranja, y 1,2 de ellas del corazón (cheb<=2)
+  // contra -0,4 —sí, negativo: el naranja barre la orla y el colapso COMPACTA el
+  // corazón, deja más piedra dentro de la que había—. Límite conocido y aceptado:
+  // el turquesa tampoco garantiza abrir el corazón, porque vuela como el naranja y
+  // choca con lo primero que encuentra, que con el montón crecido es el anillo 4,6;
+  // en 10 de 21 lanzamientos medidos no llegó al centro. Atravesar el montón y
+  // detonar en el núcleo lo subía a 10,3 piedras del corazón, y se descartó: la
+  // bola dejaría de poder encajarse y siempre caería en el mismo sitio.
+  { col:"#1fd3c3", fill:"#7fe6dc",
+    blast(c,r){ return (q,s) => (q-c)*(q-c) + (s-r)*(s-r) <= BOMB_R2; } },
+];
 // Las blancas tienen su propio reloj, pero caen como las de color. Su reloj SUMA
 // al de las de color, no lo ocupa, así que el suelo de 3 s contra el de 0,95 s
 // deja una blanca por cada 3,2 de color: una cuota del 24%. El objetivo es ese
@@ -209,9 +258,9 @@ const GAUGE_MAX   = 360;
 // lo cierra de una; a base de tríos (15) hacen falta tres.
 const GAUGE_INTRO = 324;
 const GAUGE_TRACK = "#2a2e4a";
-const GAUGE_FILL  = "#ffa06b";
-// alerta de muerte. No comparte familia ni con el gauge — que sería concéntrico
-// y naranja a la vez — ni con el rojo COL[0] que late detrás en el montón.
+// el relleno no es fijo: es el del bonus que el anillo va a entregar (ver BONUS)
+// alerta de muerte. No comparte familia ni con el gauge —que sería concéntrico y
+// del color del premio a la vez— ni con el rojo COL[0] que late detrás en el montón.
 const DANGER      = "#ff2d4a";
 
 // 4 colores base + morado, que entra con el nivel 5
@@ -250,7 +299,7 @@ const LEVELS = [
   // el frame cero (ver gaugeOn()): ese salto sería un bonus regalado a mitad de
   // partida y sin texto que lo justifique.
   { n:4, id:"gauge",  at:90,  intro(){ gauge = GAUGE_INTRO; },
-                      tip:"Cierra el anillo naranja: saldrá una bola que arrasa todo lo que encuentre a su paso." },
+                      tip:"Cierra el anillo: saldrá una bola que arrasa todo lo que encuentre a su paso." },
   // El púrpura no puede esperar al azar: con 5 colores en la bolsa podría tardar
   // varias fichas en salir y el tip se leería sin nada que mirar. `forceK` reserva
   // el color de la próxima ficha, y si el aviso de la pendiente todavía no ha
@@ -336,7 +385,7 @@ function showLevel(){
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,DPR,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
 let grid, angle, angleT, anglePrev, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, deadBall, outBall, nextSpawn, whiteT, lastColorAngle;
-let level, tipT, gaugeEarly, forceK, prevSine, forceSine;
+let level, tipT, gaugeEarly, forceK, prevSine, forceSine, bonusNext;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
 let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
 let bestSaved;
@@ -512,8 +561,11 @@ const DEPTH = new Int8Array(N*N);
 function reset(){
   grid = new Array(N*N).fill(null);
   floaters = []; cascadeF = null;
-  flashT = 0; flashSet = new Set(); flashBonus = false;
+  flashT = 0; flashSet = new Set(); flashBonus = null;
   pendingBonus = null;
+  // la alternancia no se arrastra entre partidas: el primer anillo de cada una
+  // entrega el naranja, que es el que explica el tip del nivel 4.
+  bonusNext = 0;
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
   angle = angleT = anglePrev = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
   spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; deadBall = outBall = null; lastColorAngle = null;
@@ -709,12 +761,15 @@ function spawnWhite(){
 }
 // sale por el punto de anclaje del anillo, donde el arco acaba de cerrarse:
 // el medidor y su premio comparten sitio, no solo momento.
-function spawnBonus(lvl){
+function spawnBonus(){
   const a = GAUGE_A0;
   const x = Math.cos(a)*0.50, y = Math.sin(a)*0.50;
-  flying.push({ bonus:true, lvl, th:a, r:0.50,
+  flying.push({ bonus:true, kind:bonusNext, th:a, r:0.50,
                 dir: Math.random()<0.5?1:-1, trail:[],
                 x, y, px:x, py:y });
+  // el siguiente anillo promete el otro, y lo dice ya: el aro cambia de color
+  // mientras se vacía, tapado por su propio destello blanco (ver GAUGE_FLASH).
+  bonusNext ^= 1;
 }
 
 function stepFlying(dt){
@@ -983,7 +1038,7 @@ function restCell(s){
 
 function land(b, s){
   // el bonus no ocupa celda: actúa sobre la celda del montón contra la que choca
-  if (b.bonus){ applyBonus(s.hit); return; }
+  if (b.bonus){ applyBonus(b.kind, s.hit); return; }
 
   const cell = restCell(s);
   // impactó sin haber tenido nunca una celda libre dentro del campo: no cabe.
@@ -1250,7 +1305,9 @@ function splitComponents(set){
 // 1. se detecta el match y las fichas destellan a blanco (sin desaparecer aún)
 // 2. al acabar el destello se vacían, cae el montón y se busca el siguiente match
 const FLASH_TIME = 0.19;
-let flashT = 0, flashSet = new Set(), flashBonus = false, comboDepth = 0;
+// flashBonus no es una bandera: es el índice en BONUS del bonus que provocó el
+// destello, o null si lo provocó un match. Lo necesita el color del texto.
+let flashT = 0, flashSet = new Set(), flashBonus = null, comboDepth = 0;
 // un bonus que impacta con un destello en curso espera su turno en vez de pisarlo
 let pendingBonus = null;
 
@@ -1259,7 +1316,7 @@ function tryMatch(){
   const pops = findPops();
   if (!pops.size) return false;
   flashSet = pops;
-  flashBonus = false;
+  flashBonus = null;
   flashT = FLASH_TIME;
   return true;
 }
@@ -1280,9 +1337,9 @@ function commitFlash(){
   const chained = comboDepth > 0 && cascadeF;
   let first = null;                  // texto del primer eslabón, por si hay cadena
 
-  if (flashBonus){
+  if (flashBonus !== null){
     const pts = flashSet.size*5;
-    const f = addFloater([...flashSet], pts, "#f26b3a");
+    const f = addFloater([...flashSet], pts, BONUS[flashBonus].col);
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
     // barrido limpio: si no queda una sola bola, el premio se multiplica. El
     // texto lo cuenta como una cadena —dobla y engorda por pasos, con el ritmo
@@ -1313,8 +1370,8 @@ function commitFlash(){
     if (chained){ cascadeF.links++; cascadeF.bump = 1; }
   }
 
-  const wasBonus = flashBonus;
-  flashSet = new Set(); flashBonus = false; flashT = 0;
+  const wasBonus = flashBonus !== null;
+  flashSet = new Set(); flashBonus = null; flashT = 0;
   gravityPass();
 
   // encadena: si la caída formó match, sube el combo y vuelve a destellar.
@@ -1336,8 +1393,8 @@ function commitFlash(){
 
   // el bonus esperó a que la resolución terminara entera, encadenados incluidos
   if (flashT <= 0 && pendingBonus !== null){
-    const lv = pendingBonus; pendingBonus = null;
-    fireBonus(lv);
+    const pb = pendingBonus; pendingBonus = null;
+    fireBonus(pb.kind, pb.cell);
   }
   // y la bola de fuera, a todo lo anterior, bonus incluido
   if (!dead) settleOut();
@@ -1350,27 +1407,27 @@ function stepFlash(dt){
 }
 
 // ─── bonus ─────────────────────────────────────────────────────────────────
-// Un único bonus: revienta el marco de la celda impactada y todos los exteriores.
-// El nivel es el de la celda del MONTÓN contra la que choca, no el de una celda libre.
-function applyBonus(cell){
-  const lv = Math.max(1, cheb(cell[0], cell[1]));   // nunca arrasa desde el núcleo
-  // El nivel se fija en el IMPACTO, que es lo que el jugador vio, pero el barrido
-  // puede tener que esperar: asignar flashSet con un destello en curso borraba el
-  // match que estaba parpadeando —ni estallaba ni puntuaba—. La espera no le
-  // quita nada al premio, porque lo que se guarda es el anillo, no las celdas.
-  if (flashT > 0){ pendingBonus = lv; return; }
-  fireBonus(lv);
+// La forma del cráter la pone BONUS[kind].blast; aquí solo está lo común a todos.
+function applyBonus(kind, cell){
+  // Tipo y celda se fijan en el IMPACTO, que es lo que el jugador vio, pero el
+  // barrido puede tener que esperar: asignar flashSet con un destello en curso
+  // borraba el match que estaba parpadeando —ni estallaba ni puntuaba—. La espera
+  // no le quita nada al premio, porque lo que se guarda es de dónde salió el
+  // cráter, no las celdas: el montón que se mueva mientras tanto también cae.
+  if (flashT > 0){ pendingBonus = { kind, cell }; return; }
+  fireBonus(kind, cell);
 }
-function fireBonus(lv){
+function fireBonus(kind, cell){
+  const hits = BONUS[kind].blast(cell[0], cell[1]);
   const kill = new Set();
   for (let q=0;q<N;q++) for (let s=0;s<N;s++){
-    if (cheb(q,s) < lv) continue;
+    if (!hits(q,s)) continue;
     const g = grid[idx(q,s)];
-    if (g && g.k>=0) kill.add(idx(q,s));
+    if (g && g.k>=0) kill.add(idx(q,s));   // la piedra central (k<0) no se toca
   }
   if (kill.size){
     flashSet = kill;
-    flashBonus = true;
+    flashBonus = kind;
     flashT = FLASH_TIME;
   }
 }
@@ -1685,7 +1742,7 @@ function drawGauge(){
   const p = Math.max(0, Math.min(1, gaugeV/GAUGE_MAX));
   if (p > 0.002){
     // horario desde las 9: pasa por arriba y cierra en el punto de partida
-    cx.strokeStyle = GAUGE_FILL;
+    cx.strokeStyle = BONUS[bonusNext].fill;
     cx.beginPath(); cx.arc(ox,oy,gaugeRad,GAUGE_A0,GAUGE_A0+p*Math.PI*2); cx.stroke();
   }
   if (gaugeFlashT > 0){
@@ -1819,10 +1876,11 @@ function draw(){
   for (const b of flying){
     const [x,y] = toScreen(b.x, b.y);
     if (b.bonus){
+      const col = BONUS[b.kind].col;
       trailPath(b.trail);
-      cx.strokeStyle="rgba(242,107,58,.45)"; cx.lineWidth=rad*0.5; cx.stroke();
+      cx.strokeStyle=rgba(col,0.45); cx.lineWidth=rad*0.5; cx.stroke();
       const pu = 1+0.18*Math.sin(t*18);
-      bubble(x,y,"#f26b3a",rad*1.05*pu,true);
+      bubble(x,y,col,rad*1.05*pu,true);
     } else {
       if (b.hard){
         trailPath(b.trail);
@@ -1850,8 +1908,10 @@ function popFx(x, y, fill, rad){
   cx.restore();
   return [mix(fill, "#ffffff", Math.min(1, e*1.35)), rad*(1 + 0.30*e)];
 }
+function rgba(hex,a){ return `rgba(${hexRGB(hex).join(",")},${a})`; }
+function hexRGB(s){ return [1,3,5].map(i=>parseInt(s.substr(i,2),16)); }
 function mix(a,b,p){
-  const h=s=>[1,3,5].map(i=>parseInt(s.substr(i,2),16));
+  const h=hexRGB;
   const A=h(a),B=h(b);
   return `rgb(${A.map((v,i)=>Math.round(v+(B[i]-v)*p)).join(",")})`;
 }
@@ -1932,7 +1992,7 @@ function frame(now){
     // llegue al tope: disparar con gaugeV a medias rompe la relación que busca el aro.
     if (gaugeOn() && gauge >= GAUGE_MAX && gaugeV >= GAUGE_MAX-3){
       gaugeFlashT = GAUGE_FLASH;
-      spawnBonus(4);
+      spawnBonus();
       gauge = 0;                 // gaugeV baja sola: el anillo se vacía barriendo
     }
 

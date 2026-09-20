@@ -42,7 +42,12 @@ orientativo: 80 líneas.
   rótulo de multiplicador ni resumen aparte: los textos suman siempre lo que
   sube el marcador. El bonus que no deja una sola bola en el tablero vale ×4 y
   lo cuenta igual: un texto que dobla dos veces, con el ritmo y los parámetros
-  de la cascada. El bonus no carga el anillo.
+  de la cascada. Ningún bonus carga el anillo.
+- Los bonus alternan: cada cierre del anillo entrega uno y deja cargado el
+  siguiente, y el aro se tiñe del color del que promete. De ahí que ningún tip
+  pueda llamar al anillo por su color. Son una tabla (`BONUS`), no casos
+  especiales: uno nuevo es una entrada con su color, su relleno de aro y su
+  molde de cráter, sin tocar quien los lanza, los cobra ni los dibuja.
 - La bola que no cabe se juzga antes de morir (hueco liberado o match desde
   fuera), pero solo espera una a la vez: sin cola. La espera dura un destello y
   en 16.000 partidas no llegó nunca una segunda; si llega, muere sin juicio.
@@ -57,6 +62,13 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 - Se avanza a mano con `frame(now)` y `dt` fijo, con `Math.random` sembrado.
   Antes del primer frame, `last = 0`: arranca con el `performance.now()` real y
   el primer `dt` rompe el determinismo, incluso de `HEAD` contra `HEAD`.
+- Sembrar no basta: hay que **volver a llamar a `reset()`** después, porque el
+  del arranque ya consumió el `Math.random` real. Sin eso, dos corridas de la
+  misma semilla divergen en el primer aterrizaje y el arnés miente.
+- El script de pruebas comparte ámbito global con el juego: `R`, `C`, `N`, `OUT`
+  y compañía están cogidos, y redeclararlos es un `SyntaxError` que deja la
+  página en blanco. Si no sale nada, la consola
+  (`--enable-logging=stderr --v=0`) antes que sospechar del juego.
 - La ventana se simula redefiniendo `innerWidth`/`innerHeight` y llamando a
   `resize()`.
 - El input se simula despachando `PointerEvent`/`KeyboardEvent` reales, con
