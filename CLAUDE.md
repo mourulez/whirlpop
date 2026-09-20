@@ -36,11 +36,13 @@ orientativo: 80 líneas.
   de pantalla o con una fase de entrada, se descarta: el arco ya anticipa de
   dónde vienen.
 - Puntuación sin decimales, ni en la lógica ni en pantalla: multiplicadores
-  enteros (tamaño y combo). El anillo se llena con los mismos puntos que suma el
-  marcador; no tiene una tabla de carga propia.
+  enteros (tamaño, combo y barrido limpio). El anillo se llena con los mismos
+  puntos que suma el marcador; no tiene una tabla de carga propia.
 - La cascada se premia con un solo `+N` que crece y engorda en cada eslabón, sin
   rótulo de multiplicador ni resumen aparte: los textos suman siempre lo que
-  sube el marcador.
+  sube el marcador. El bonus que no deja una sola bola en el tablero vale ×4 y
+  lo cuenta igual: un texto que dobla dos veces, con el ritmo y los parámetros
+  de la cascada. El bonus no carga el anillo.
 - La bola que no cabe se juzga antes de morir (hueco liberado o match desde
   fuera), pero solo espera una a la vez: sin cola. La espera dura un destello y
   en 16.000 partidas no llegó nunca una segunda; si llega, muere sin juicio.

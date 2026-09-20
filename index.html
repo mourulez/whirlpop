@@ -1282,9 +1282,14 @@ function commitFlash(){
 
   if (flashBonus){
     const pts = flashSet.size*5;
-    addFloater([...flashSet], pts, "#f26b3a");
+    const f = addFloater([...flashSet], pts, "#f26b3a");
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
-    score += pts;
+    // barrido limpio: si no queda una sola bola, el premio se multiplica. El
+    // texto lo cuenta como una cadena —dobla y engorda por pasos, con el ritmo
+    // y los parámetros del combo— hasta el total, que es lo que sube el marcador.
+    const clean = boardClean();
+    if (clean) startClearX2(f);
+    score += clean ? pts*CLEAR_MULT : pts;
   } else {
     // puntuación y carga se calculan POR GRUPO, no sobre el total. En cascada
     // los puntos no sacan texto propio: engordan el de la cadena (ver cascadeF)
@@ -1370,6 +1375,15 @@ function fireBonus(lv){
   }
 }
 
+// Barrido limpio: el bonus que no deja una sola bola en el tablero vale ×4. Se
+// dobla en dos pasos para que el texto pueda contarlo (ver `x2` en los flotantes).
+const CLEAR_X2 = 2, CLEAR_MULT = 1 << CLEAR_X2;
+function boardClean(){
+  if (outBall) return false;                            // la que espera fuera también cuenta
+  for (const g of grid) if (g && g.k>=0) return false;   // la piedra central (k<0) no
+  return true;
+}
+
 // ─── textos flotantes de puntuación ────────────────────────────────────────
 // Un texto por grupo, salvo en cascada: el del primer eslabón se queda quieto
 // (`held`) y va sumando los siguientes, más grande en cada uno. Así los textos
@@ -1389,13 +1403,21 @@ function popCentroid(cells){
 }
 function addFloater(cells, pts, tone){
   const [fc,fr] = popCentroid(cells);
-  const f = { fc, fr, pts, tone, life:0, rise:0, held:false, links:1, bump:0 };
+  const f = { fc, fr, pts, tone, life:0, rise:0, held:false, links:1, bump:0, x2:0, x2T:0 };
   floaters.push(f);
   return f;
 }
+// arranca el doblado del barrido limpio: se retiene quieto mientras dobla
+function startClearX2(f){ f.held = true; f.x2 = CLEAR_X2; f.x2T = FLASH_TIME; }
 function stepFloaters(dt){
   for (let i=floaters.length-1;i>=0;i--){
     const f = floaters[i];
+    // cada paso duplica el número y lo engorda, como un eslabón de cascada; al
+    // gastar el último se suelta y se desvanece ya con el total puesto
+    if (f.x2 > 0 && (f.x2T -= dt) <= 0){
+      f.pts *= 2; f.links++; f.bump = 1; f.x2T = FLASH_TIME;
+      if (--f.x2 === 0) f.held = false;
+    }
     f.life = f.held ? Math.min(f.life+dt, FLOAT_HOLD) : f.life+dt;
     f.rise += dt*1.05;                             // `rise` en celdas: ver "conversiones"
     f.bump = Math.max(0, f.bump - dt/FLOAT_BUMP);
