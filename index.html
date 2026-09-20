@@ -120,8 +120,17 @@ const FALL_ACCEL   = 0.065;                 // aceleración durante la caída
 const HARD_SPEED   = 0.95;                  // velocidad mínima tras hard drop
 const HARD_ACCEL   = 0.55;                  // y sigue acelerando más fuerte
 const SPIRAL_TANGENT = 2.1, SPIRAL_INWARD = 0.085;
-// las blancas tienen su propio reloj, pero caen como las de color
-const WHITE_INT_START = 8, WHITE_INT_MIN = 4.0, WHITE_INT_RAMP = 340;
+// Las blancas tienen su propio reloj, pero caen como las de color. Su reloj SUMA
+// al de las de color, no lo ocupa, así que el suelo de 3 s contra el de 0,95 s
+// deja una blanca por cada 3,2 de color: una cuota del 24%. El objetivo es ese
+// ratio, no el suelo, y por eso la rampa es más corta que la de color —200 contra
+// 380—: la de color todavía está bajando, así que con rampas iguales el ratio se
+// pasaba la partida entera de camino y solo llegaba a 1/3 hacia los 15 min.
+// Con 200 llega cuando abre el último nivel (t=265: 1/3,2) y sin rebasarlo: el
+// máximo de blancas se da en t=455 y es 1/2,97, un 1% de nada. Más corta sí lo
+// rebasa —con 98 el ratio baja a 1/2,56 a mitad de partida y luego vuelve a
+// subir—, y eso es un pico de blancas que nadie ha pedido.
+const WHITE_INT_START = 8, WHITE_INT_MIN = 3.0, WHITE_INT_RAMP = 200;
 const WHITE_SPREAD = 50 * Math.PI/180;   // dispersión alrededor del punto opuesto
 const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
 const TELEGRAPH = 1.25;                     // aviso previo a la salida de cada ficha
@@ -246,6 +255,8 @@ const LEVELS = [
 // Intervalo entre blancas: se acorta con la partida, pero la rampa cuenta desde
 // que abrió el nivel 3, no desde t=0. En el propio instante de abrir vale
 // WHITE_INT_START, así que la blanca del tutorial deja el ciclo recién arrancado.
+// De 8 s a 3,9 s mientras abren los niveles 4 a 8: las blancas doblan su ritmo
+// justo en el tramo en el que el jugador ya las conoce y llega todo lo demás.
 function whiteInterval(){
   return WHITE_INT_MIN + (WHITE_INT_START-WHITE_INT_MIN)*
          Math.exp(-(t-LEVELS[2].at)/WHITE_INT_RAMP*1.6);
