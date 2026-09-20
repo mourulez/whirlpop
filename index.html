@@ -1083,8 +1083,11 @@ function gameOver(o){
 // ─── cadenas, colateral, gravedad ──────────────────────────────────────────
 // Un match de 2 no estalla, pero reinicia el reloj de petrificación de las dos
 // fichas: da una vía para gestionar una piedra incipiente sin necesidad de
-// cerrar un match de 3. Se evalúa sobre el grupo de la ficha recién aterrizada;
-// un grupo de 3 o más no lo necesita, porque va a estallar.
+// cerrar un match de 3. Se evalúa sobre el grupo de una ficha que acaba de
+// cambiar de celda —la recién aterrizada o cualquiera que haya deslizado en el
+// asentamiento—, que es la única forma de estrenar pareja: un grupo de 2 del
+// mismo color no puede perder miembros, porque a 3 ya estalla. Un grupo de 3 o
+// más no lo necesita, por lo mismo.
 function refreshGroup(c,r){
   const g = grid[idx(c,r)];
   if (!g || g.k<0 || g.k===WHITE || g.k===STONE) return;
@@ -1152,6 +1155,7 @@ function findPops(){
 // No es recursiva: no vuelve a lanzarse sola, la llama quien provoca el estallido.
 function gravityPass(){
   let anyMoved = false;
+  const movedBalls = new Set();
   for (let sweep=0; sweep<N*2; sweep++){
     const cells = [];
     for (let r=0;r<N;r++) for (let c=0;c<N;c++){
@@ -1179,11 +1183,21 @@ function gravityPass(){
         const q = mx ? r : r+Math.sign(dy);
         if (!playable(p,q) || grid[idx(p,q)]) break;
         grid[idx(p,q)] = grid[idx(c,r)]; grid[idx(c,r)] = null;
+        movedBalls.add(grid[idx(p,q)]);
         c=p; r=q; any = anyMoved = true;
       }
     }
     if (!any) break;                                  // ya está estable
   }
+  // Lo que la gravedad deja emparejado estrena match de 2 igual que lo que
+  // aterriza, así que cada ficha deslizada pasa por refreshGroup. Sin esto la
+  // regla dependía de cómo se hubiera formado la pareja —al aterrizar sí, al
+  // reconfigurarse el montón no—, y una piedra incipiente que quedaba pegada a
+  // una igual por la caída del montón seguía corriendo hacia STONE_TIME.
+  // Se hace al final, con el montón ya estable: una ficha puede deslizar en
+  // varios barridos y solo cuenta el grupo de donde acaba.
+  if (movedBalls.size)
+    for (let i=0;i<N*N;i++) if (movedBalls.has(grid[i])) refreshGroup(i%N, (i/N)|0);
   return anyMoved;
 }
 
