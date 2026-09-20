@@ -120,6 +120,23 @@ const FALL_ACCEL   = 0.065;                 // aceleración durante la caída
 const HARD_SPEED   = 0.95;                  // velocidad mínima tras hard drop
 const HARD_ACCEL   = 0.55;                  // y sigue acelerando más fuerte
 const SPIRAL_TANGENT = 2.1, SPIRAL_INWARD = 0.085;
+// La espiral se cierra a velocidad tangencial constante, así que el barrido
+// angular se dispara al acercarse al centro (ω = v/r). Y ahí es donde cae el
+// bonus siempre: en 48 impactos medidos el radio va de 0.054 a 0.214, nunca más
+// afuera, o sea que el tramo que decide el premio se recorría a entre 130 y 380
+// grados por segundo. Con el tablero girando debajo eso no se apunta: se suelta
+// y se mira.
+// A partir de SPIRAL_BRAKE_R el ritmo baja proporcional al radio, que es
+// exactamente lo que deja ω plano —frenar proporcional al radio es poner techo
+// al barrido, aquí 77°/s—, y la bola entra en el núcleo girando como giraba al
+// cruzar el borde, frenando a la vista. El suelo está porque ese frenado es
+// exponencial: sin él la bola nunca llega.
+// Los dos pasos, ángulo y radio, se escalan con el MISMO factor: el camino es el
+// de antes punto por punto y solo cambia el ritmo con el que se recorre, igual
+// que SINE_EASE reparte la onda sin tocar su forma. Frenar solo el giro
+// enderezaría la entrada, que es otra cosa: la espiral dejaría de serlo al final.
+const SPIRAL_BRAKE_R = 0.25;   // radio donde empieza a frenar, en mundo
+const SPIRAL_BRAKE   = 0.45;   // suelo del ritmo, fracción del de fuera
 // Las blancas tienen su propio reloj, pero caen como las de color. Su reloj SUMA
 // al de las de color, no lo ocupa, así que el suelo de 3 s contra el de 0,95 s
 // deja una blanca por cada 3,2 de color: una cuota del 24%. El objetivo es ese
@@ -705,8 +722,11 @@ function stepFlying(dt){
     const b = flying[i];
     b.px = b.x; b.py = b.y;                           // origen del rayo del frame
     if (b.bonus){                                     // espiral hacia dentro
-      b.th += SPIRAL_TANGENT*b.dir*dt*(0.16/Math.max(b.r,0.05));
-      b.r  -= SPIRAL_INWARD*dt;
+      // frenada de aproximación (ver SPIRAL_BRAKE_R): mismo factor en los dos
+      // pasos, así que la espiral no se mueve, solo se recorre más despacio.
+      const pace = Math.min(1, Math.max(SPIRAL_BRAKE, b.r/SPIRAL_BRAKE_R));
+      b.th += SPIRAL_TANGENT*b.dir*dt*pace*(0.16/Math.max(b.r,0.05));
+      b.r  -= SPIRAL_INWARD*dt*pace;
       b.x = Math.cos(b.th)*b.r; b.y = Math.sin(b.th)*b.r;
       b.trail.push([b.x,b.y]); if (b.trail.length>22) b.trail.shift();
     } else {
