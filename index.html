@@ -823,16 +823,12 @@ function stepFlying(dt){
 // montón entre dos frames.
 //
 // El recorrido es exacto, no muestreado, y la diferencia no es cosmética. Con
-// muestras cada 0.25 celdas, un segmento que pasa rozando la esquina entre dos
-// celdas puede no caer NUNCA dentro de una de ellas: pertenece a esa celda
-// durante menos de lo que mide un paso. En el 4% de las direcciones ese tramo
-// dura menos de 0.10 celdas. Cuando la celda saltada era la libre del borde,
-// `free` se quedaba a null y la bola moría contra la de detrás —una celda
-// entera hacia dentro, con hueco libre delante—: era la muerte que no se
-// entendía. Medido sobre un tablero con TODO el anillo de borde libre, donde
-// nadie debería morir jamás, el muestreo mataba en 32 de 3600 direcciones a 60
-// fps y en 56 con hard drop a 20; el recorrido exacto, en 0 de 3600 en las
-// cuatro combinaciones. Y de paso se va la dependencia del framerate.
+// muestreo, un segmento que pasa rozando la esquina entre dos celdas puede no
+// caer NUNCA dentro de una de ellas: pertenece a esa celda durante menos de lo
+// que mide un paso. Cuando la celda saltada era la libre del borde, `free` se
+// quedaba a null y la bola moría contra la de detrás —una celda entera hacia
+// dentro, con hueco libre delante—: era la muerte que no se entendía. Y de paso
+// se va la dependencia del framerate.
 //
 // Los bordes de celda están en los semienteros, así que recorrerlas en orden es
 // ir saltando al siguiente cruce —en c o en r, el que caiga antes—: `tc` y `tr`
@@ -1035,13 +1031,12 @@ function land(b, s){
     // El cálculo anterior —una celda hacia atrás sobre el vector del rayo— dejaba
     // la bola fuera de la rejilla y dependía de una dirección que, desde que el
     // rayo ve el giro, es la relativa y no la suya: girando la ponía AL LADO del
-    // montón en vez de por fuera, y en un 11% de las muertes encima de una casilla
-    // libre, que se lee "pero si cabía".
+    // montón en vez de por fuera, a veces encima de una casilla libre, que se lee
+    // "pero si cabía".
     const o = { k:b.k, vc:s.slot[0], vr:s.slot[1], hit:s.hit };
     // Antes de morir se la juzga: puede cerrar un match desde fuera. Ver settleOut().
     // Solo espera una a la vez; la que llega mientras otra espera muere sin juicio.
-    // En 16.000 partidas sembradas no ha pasado nunca: la espera dura lo que un
-    // destello, y en ese rato no llega otra bola sin hueco.
+    // La espera dura lo que un destello, y en ese rato no llega otra bola sin hueco.
     if (outBall) gameOver(o);
     else { outBall = o; settleOut(); }
     return;
@@ -1063,16 +1058,15 @@ function place(k, cell, vc, vr){
   // Antes la gravedad únicamente corría dentro de commitFlash(), así que una
   // bola que paraba contra un saliente —con hueco radialmente por dentro— se
   // quedaba colgada indefinidamente. El siguiente match, en cualquier punto del
-  // tablero, disparaba el barrido global y esas bolas caían TODAS de golpe: el
-  // 60% de los movimientos posteriores a un match eran deuda vieja de otros
-  // disparos, a 3,4 celdas de media del match y hasta 9, en la punta contraria.
-  // Lo que el match suelta de verdad no pasa de 3 celdas.
+  // tablero, disparaba el barrido global y esas bolas caían TODAS de golpe y en
+  // la punta contraria: deuda vieja de otros disparos, no algo que ese match
+  // hubiera soltado.
   //
   // Asentando al caer el montón está siempre estable, y entonces un match solo
   // puede mover lo que él mismo ha soltado: la cadena sigue ocurriendo, pero
-  // ocurre donde el jugador está mirando. El 89% de los disparos no desliza
-  // nada —la bola sigue parando donde toca—; el resto desliza una celda, y ese
-  // deslizamiento se ve, porque `vc`/`vr` salen del punto de impacto.
+  // ocurre donde el jugador está mirando. Casi ningún disparo desliza —la bola
+  // sigue parando donde toca—, y el que lo hace desliza una celda, deslizamiento
+  // que además se ve, porque `vc`/`vr` salen del punto de impacto.
   //
   // Con un destello en curso NO se asienta: flashSet guarda índices, y mover
   // fichas por debajo dejaría esos índices apuntando a celdas equivocadas.
