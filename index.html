@@ -27,7 +27,8 @@
   #c { display:block; width:100%; height:100%; touch-action:none; }
   /* HUD: pertenece a la columna, se reparte sobre --stage y escala con --u.
      Los dos marcadores viven abajo, en fila y con la misma composición —etiqueta
-     encima, número debajo—, dejando toda la mitad superior libre.
+     encima, número debajo—, dejando toda la mitad superior libre. En landscape,
+     si caben, se abren a los lados (.wide, abajo).
      pointer-events:none es crítico: el HUD cae justo donde el pulgar empieza el
      arrastre y si captura el gesto, el giro se pierde. */
   #hud { position:fixed; left:50%; transform:translateX(-50%); width:var(--stage);
@@ -35,6 +36,13 @@
          display:flex; justify-content:space-around; align-items:flex-start;
          pointer-events:none; }
   .hblock { display:flex; flex-direction:column; align-items:center; }
+  /* .wide (la pone resize() cuando caben): cada marcador sale a la franja libre
+     de su lado —entre el margen seguro y el halo, medida a su altura— y se
+     centra en ella, a la misma altura. --chord lo escribe wideStage(). */
+  .wide #hud { left:0; width:100%; transform:none; justify-content:space-between;
+               padding:0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+  .wide .hblock { width:calc(50vw - var(--chord) - env(safe-area-inset-left)); }
+  .wide .hblock + .hblock { width:calc(50vw - var(--chord) - env(safe-area-inset-right)); }
   /* .lvl-n comparte la regla de las etiquetas del HUD, no la copia: "NIVEL 3" es
      rótulo, del mismo rango que SCORE, no un dato que se consulte. En una sola
      regla no pueden separarse al retocar cualquiera de las dos. */
@@ -43,10 +51,10 @@
   .hval   { font-size:max(22px, calc(var(--u)*6.2)); letter-spacing:1px;
             line-height:1.3; color:#cfd2e6; }
   /* Nivel y micro-tutorial: mismo esqueleto que el HUD, en la franja de arriba.
-     La línea "NIVEL X" es permanente y su altura se descuenta del lift en
-     resize(). El tip es absolute respecto al bloque, así que NO aporta altura:
-     la esfera no salta al aparecer ni al irse el texto, que simplemente se
-     superpone sobre la franja alta del área de juego. */
+     Ninguno reserva altura: la esfera se coloca como si no estuvieran y los dos
+     se superponen sobre la franja alta del área de juego. El tip es absolute
+     respecto al bloque, así que la esfera tampoco salta al aparecer ni al irse
+     el texto. */
   #lvl { position:fixed; left:50%; transform:translateX(-50%); width:var(--stage);
          top:max(calc(var(--u)*2.4), env(safe-area-inset-top));
          text-align:center; pointer-events:none; }
@@ -80,6 +88,10 @@
   #fs:active { background:rgba(70,80,140,.75); }
   .btn:active { background:rgba(70,80,140,.75); }
   .btn.arm { border-color:#f26b3a; color:#f26b3a; }
+  /* sonda: JS no lee env(); resize() mide su alto para no meter la esfera
+     bajo la muesca */
+  #safe-top { position:fixed; top:0; left:0; width:0; height:env(safe-area-inset-top);
+              visibility:hidden; pointer-events:none; }
   #over { position:fixed; inset:0; display:none; flex-direction:column; gap:calc(var(--u)*2);
           align-items:center; justify-content:center; background:rgba(4,4,10,.82);
           color:#e8e8f4; font-size:max(16px, calc(var(--u)*4)); letter-spacing:2px;
@@ -99,6 +111,7 @@
   <div class="lvl-tip"></div>
 </div>
 <div id="fs">⛶</div>
+<div id="safe-top"></div>
 <div id="over"><b>GAME OVER</b><span id="fin">0</span><small>toca para reiniciar</small></div>
 
 <script>
@@ -107,9 +120,10 @@
 // ─── config ────────────────────────────────────────────────────────────────
 const N = 15, C = (N-1)/2;
 const R_FACTOR = 0.46;
-// mobile first: el layout es siempre una columna vertical. STAGE es su ancho, y
-// de él sale todo el tamaño del juego. Único número para abrir o cerrar la
-// columna en todas las pantallas a la vez.
+// mobile first: el layout es una columna vertical. STAGE es su ancho, y de él
+// sale todo el tamaño del juego. Único número para abrir o cerrar la columna en
+// todas las pantallas a la vez. En landscape los marcadores pueden salir a los
+// lados y la columna se ensancha: ver wideStage().
 const STAGE_ASPECT = 0.645;
 const ROT_STEP = 7.5 * Math.PI/180;
 const ROT_TWEEN = 26;      // seguimiento de angle hacia angleT; a 340°/s un valor bajo va elástico
@@ -190,14 +204,9 @@ const SINE_MAX_STEP = 0.02;   // avance máximo por subpaso de integración, mú
 const SINE_EASE = 0;
 const SINE_P_START = 0.12, SINE_P_MAX = 0.30, SINE_RAMP = 220;
 
-// elevación de la esfera: sale de la holgura vertical, sin media queries
-const LIFT_K   = 0.5;      // fracción de la altura sobrante que se consume
-const LIFT_MAX = 0.14;     // tope duro en fracción de STAGE — calibrar en dispositivo
-const TOP_KEEP = 0.09;     // aire mínimo sobre la zona de juego, múltiplo de PS
-// franja que ocupa la línea "NIVEL X", múltiplo de PS: el margen superior (2.4u)
-// más su caja de texto (2.9u de cuerpo por 1.3 de interlínea) y un poco de aire.
-// Si se retoca el cuerpo de .hlabel hay que rehacer esta cuenta.
-const LVL_BAND = 0.08;
+// elevación de la esfera fuera de .wide: sube hasta dejar este aire mínimo
+// sobre la zona de juego, múltiplo de PS
+const TOP_KEEP = 0.09;
 
 // Los tres anillos concéntricos —gauge, frontera y aviso de salida— forman una
 // sola familia: cada uno hacia fuera es 1.5x el anterior, y el aire entre trazos
@@ -209,6 +218,11 @@ const GAUGE_W     = 0.008;       // trazo del gauge
 const BORDER_W    = 0.012;       // frontera = GAUGE_W * 1.5
 const TELE_W      = 0.018;       // aviso    = BORDER_W * 1.5
 const TELE_HALO_W = 0.085;       // resplandor del aviso: fuera de la progresión
+// borde exterior del halo: lo más lejano que se dibuja del juego (las fichas
+// nacen a 0.52 y no llegan). En landscape la esfera se escala contra él.
+const HALO_R      = R_FACTOR + BORDER_W/2 + RING_GAP + TELE_HALO_W;
+const WIDE_AIR    = 0.03;        // landscape: aire del halo al borde de pantalla
+const SIDE_AIR    = 0.04;        // landscape: aire a cada lado de un marcador
 const GAUGE_A0    = Math.PI;     // ancla: 9 en punto
 const GAUGE_TWEEN = 11;          // seguimiento del valor visual hacia el lógico
 const GAUGE_FLASH = 0.22;        // destello del anillo cerrado, en segundos
@@ -548,10 +562,62 @@ function reset(){
   document.getElementById("over").style.display = "none";
 }
 
+const safeTopEl = document.getElementById("safe-top");
+const hudBlocks = document.querySelectorAll("#hud .hblock");
+const hudLabels = document.querySelectorAll("#hud .hlabel");
+
+// En landscape sobra pantalla a los lados de la columna. Si en esas franjas caben
+// los marcadores, salen de debajo de la esfera y la columna ya solo tiene que
+// abarcar el halo, con WIDE_AIR hasta el borde arriba y abajo: la esfera crece.
+// "NIVEL X" y el tip no reservan sitio; se superponen. Devuelve el STAGE de ese
+// reparto y la semicuerda del halo a la altura de los marcadores (lo que el halo
+// quita a su franja), o null si no supera al de la columna (col).
+// Solo con ventana más ancha que alta, por decisión: en portrait los marcadores
+// también cabrían en las esquinas de abajo de un tablet, pero su layout se queda
+// como está. Al cruzar el cuadrado la esfera salta de tamaño.
+function wideStage(col){
+  if (W <= H) return null;
+  const hMax = H / (2*(HALO_R + WIDE_AIR));
+  // cota sin marcadores
+  if (Math.min(hMax, W/(2*HALO_R)) <= col) return null;
+  const root = document.documentElement;
+  root.style.setProperty("--stage", hMax+"px");
+  root.style.setProperty("--chord", "0px");
+  root.classList.add("wide");
+  // los textos tienen suelo en px: se miden, no se calculan. Todo se mide a
+  // hMax, que es el peor caso: con un STAGE menor el HUD encoge y baja.
+  // Manda la etiqueta más ancha; un marcador de seis cifras es más estrecho que
+  // PERSONAL BEST a cualquier escala.
+  let lab = 0;
+  for (const e of hudLabels) lab = Math.max(lab, e.getBoundingClientRect().width);
+  // los marcadores van abajo, donde el círculo es más estrecho: la franja libre
+  // se mide a la altura de su borde superior, no en el ecuador
+  const dy = hudBlocks[0].getBoundingClientRect().top - H/2;
+  // el margen seguro no se lee desde JS: con --chord a 0, es lo que le falta a
+  // la franja más estrecha para medir media pantalla
+  const inset = W/2 - Math.min(hudBlocks[0].getBoundingClientRect().width,
+                               hudBlocks[1].getBoundingClientRect().width);
+  const chord = s => { const z = HALO_R*s; return z > dy ? Math.sqrt(z*z - dy*dy) : 0; };
+  const fits  = s => W/2 - inset - chord(s) >= lab + 2*SIDE_AIR*s;
+  // fits es monótona: bisección entre la columna y el tope de altura
+  let s = hMax;
+  if (!fits(s)){
+    let lo = col, hi = hMax;
+    for (let i = 0; i < 40; i++){ const m = (lo+hi)/2; if (fits(m)) lo = m; else hi = m; }
+    s = lo;
+  }
+  return s > col ? { s, chord: chord(s) } : null;
+}
+
 function resize(){
   W = innerWidth; H = innerHeight;
-  STAGE = Math.min(W, H*STAGE_ASPECT);
-  document.documentElement.style.setProperty("--stage", STAGE+"px");
+  const col = Math.min(W, H*STAGE_ASPECT);
+  const wide = wideStage(col);
+  const root = document.documentElement;
+  root.classList.toggle("wide", !!wide);
+  STAGE = wide ? wide.s : col;
+  root.style.setProperty("--stage", STAGE+"px");
+  if (wide) root.style.setProperty("--chord", wide.chord+"px");
 
   // buffer a resolución de dispositivo, dibujo en px CSS. La matriz que lo
   // traduce no se fija aquí sino en cada draw(): ver allí.
@@ -573,18 +639,20 @@ function resize(){
   gaugeRad  = R - PS*(BORDER_W/2 + RING_GAP + GAUGE_W/2);
   teleRadIn = R + PS*(BORDER_W/2 + RING_GAP);
 
-  // En móvil vertical los dedos tapan justo la zona por la que entran las fichas.
-  // La corrección no mira al dispositivo, mira a la holgura: donde la columna
-  // está limitada por la altura no sobra nada y la esfera se queda centrada;
-  // donde lo está por el ancho, sobra altura y la esfera sube hasta el tope.
-  const NEED  = STAGE / STAGE_ASPECT;
-  const slack = Math.max(0, H - NEED);
-  let lift = Math.min(slack*LIFT_K, STAGE*LIFT_MAX);
-  // guarda: la zona de spawn y el aviso suben con la esfera y no deben salirse
-  // por arriba. La franja superior ya no está libre —la ocupa la línea
-  // "NIVEL X"—, así que se descuenta también. Solo la línea permanente: el tip
-  // flota por encima y no reserva altura.
-  lift = Math.min(lift, Math.max(0, H/2 - PS*0.60 - PS*TOP_KEEP - PS*LVL_BAND));
+  // En vertical los pulgares van debajo de la esfera, como los mandos de una
+  // Game Boy: pantalla arriba, mandos abajo. La esfera sube siempre hasta la
+  // guarda, también donde la columna está limitada por la altura (tablets), y
+  // todo el aire que sobra queda debajo, para los pulgares. Sin tope propio: con
+  // uno, a partir de cierta esbeltez la esfera volvía a bajar al estrechar la
+  // pantalla. Guarda: la zona de spawn y el aviso suben con ella y no deben
+  // salirse por arriba ni meterse en el margen seguro (la muesca, en pantalla
+  // completa). "NIVEL X" y el tip no reservan sitio: se superponen.
+  // En .wide no sube: la esfera ya llena la altura y va centrada.
+  let lift = 0;
+  if (!wide){
+    const guard = H/2 - PS*0.60 - PS*TOP_KEEP - safeTopEl.getBoundingClientRect().height;
+    lift = Math.max(0, guard);
+  }
 
   ox = W/2; oy = H/2 - lift;
 }

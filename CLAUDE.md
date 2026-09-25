@@ -22,7 +22,8 @@ orientativo: 80 líneas.
   **Ningún estado que dure más de un frame se guarda en px.** Solo el dibujo
   convierte a pantalla, y `resize()` no migra nada.
 - Toda medida de juego y de UI es un múltiplo de `PS` (`STAGE`). En CSS se usa
-  `--u` con suelo en px. Mobile first: siempre una columna vertical.
+  `--u` con suelo en px. Mobile first: una columna vertical; solo en landscape
+  (ancho > alto) los marcadores salen a los lados y la esfera llena la altura.
 - Sin detección de dispositivo. El input es la excepción a la regla anterior:
   sus umbrales (`DRAG_PX_*`, `SPEED_REF`) van en px a propósito, porque miden
   dedo, no tablero.
@@ -54,6 +55,10 @@ orientativo: 80 líneas.
 - La bola que no cabe se juzga antes de morir (hueco liberado o match desde
   fuera), pero solo espera una a la vez: sin cola. La espera dura un destello y
   en 16.000 partidas no llegó nunca una segunda; si llega, muere sin juicio.
+- Portrait es una Game Boy: pantalla arriba, pulgares abajo. La esfera sube
+  siempre hasta la guarda superior, sin tope propio: con tope, al estrechar la
+  pantalla volvía a bajar. "NIVEL X" y el tip no reservan altura en ningún
+  layout: se superponen (el nivel va a desaparecer).
 
 ## Verificación
 
@@ -73,14 +78,18 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   página en blanco. Si no sale nada, la consola
   (`--enable-logging=stderr --v=0`) antes que sospechar del juego.
 - La ventana se simula redefiniendo `innerWidth`/`innerHeight` y llamando a
-  `resize()`.
+  `resize()`, pero eso no mueve el CSS (`vw`, HUD): para el layout, ventana real
+  con `--window-size`. El viewport sale 16×95 px menor y nunca baja de 500 de ancho.
 - El input se simula despachando `PointerEvent`/`KeyboardEvent` reales, con
   `performance.now` redefinido al reloj virtual: el arrastre mide con él.
   Una partida entera dibujando cada frame tarda ~20 s: lanzar lotes en segundo plano.
   Si no hace falta ver nada, `draw = function(){}` baja a ~1000 partidas en
   segundos por instancia de Chrome, y varias en paralelo.
-- El resultado sale por `--dump-dom`. `--screenshot` saca el canvas en negro:
-  para verlo, `draw()` y volcar `cv.toDataURL()` al DOM.
+- El resultado sale por `--dump-dom`. `--screenshot` saca el canvas en negro y
+  captura con un viewport mayor que el que vio el script: `draw()`, cambiar el
+  canvas por un `<img>` con `cv.toDataURL()`, fijar el `body` a
+  `innerWidth`×`innerHeight` con un `transform` (los `fixed` se anclan a él) y
+  cortar el `resize` tardío en fase de captura.
 - Perfil nuevo por ejecución (`--user-data-dir`): el guardado de `localStorage`
   cambia la partida.
 - URL con `?reset&tut=3&nivel=N`.
