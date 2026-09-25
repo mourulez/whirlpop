@@ -59,6 +59,10 @@ orientativo: 80 líneas.
   siempre hasta la guarda superior, sin tope propio: con tope, al estrechar la
   pantalla volvía a bajar. "NIVEL X" y el tip no reservan altura en ningún
   layout: se superponen (el nivel va a desaparecer).
+- Portrait ancho (tablet en vertical, alto/ancho < 1.55) se queda con la columna
+  0.645 y el HUD centrado debajo. La ergonomía Game Boy es de móvil (no hay
+  móviles 4:3): no se rediseña el tablet por los pulgares. Se propuso abrir ahí
+  el HUD a las esquinas para agrandar la esfera y se descartó.
 
 ## Verificación
 
