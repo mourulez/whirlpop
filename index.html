@@ -78,8 +78,10 @@
          justify-content:center; user-select:none; cursor:pointer; }
   /* chrome, no HUD: se ancla a la esquina física de la pantalla, no a la
      columna. Anclado a la columna, en landscape --stage se estrecha y el botón
-     acaba flotando en mitad del viewport. Pausa a la izquierda, fullscreen a la
-     derecha; los dos con la misma pieza. */
+     acaba flotando en mitad del viewport. Pausa a la derecha, fullscreen a la
+     izquierda; los dos con la misma pieza. La esquina izquierda es la que Safari
+     ocupa con su X en la pantalla completa del iPad, y no deja moverla: ahí va
+     el botón que en pantalla completa desaparece (ver syncFS). */
   #fs, #pz { position:fixed; top:max(calc(var(--u)*1.6), env(safe-area-inset-top));
         width:max(34px, calc(var(--u)*7.7)); height:max(34px, calc(var(--u)*7.7));
         display:flex; align-items:center; justify-content:center; border:1.5px solid #3a3f68;
@@ -88,8 +90,8 @@
         cursor:pointer; user-select:none; z-index:5; }
   /* fullscreen va por click (ver toggleFS): manipulation quita el doble toque
      que haría zoom en iOS y el retardo del click */
-  #fs { right:max(calc(var(--u)*2), env(safe-area-inset-right)); touch-action:manipulation; }
-  #pz { left:max(calc(var(--u)*2), env(safe-area-inset-left)); gap:.26em; }
+  #fs { left:max(calc(var(--u)*2), env(safe-area-inset-left)); touch-action:manipulation; }
+  #pz { right:max(calc(var(--u)*2), env(safe-area-inset-right)); gap:.26em; }
   /* las dos barras en CSS y no el glifo ⏸: en iOS y Android sale como emoji */
   #pz::before, #pz::after { content:""; width:.26em; height:.9em; border-radius:1px;
         background:currentColor; }
@@ -1777,13 +1779,22 @@ tapBtn(document.getElementById("again"), restart);
 
 // ─── fullscreen ────────────────────────────────────────────────────────────
 // Se pregunta al navegador si puede, no qué dispositivo es: el iPhone dice que no
-// y el botón no sale; el iPad sí (prefijado hasta iPadOS 16.4) y se queda.
-// Se pide en el click, no en pointerdown: solo cuenta como gesto del usuario
-// soltar el dedo, no apoyarlo. Chrome lo pasa por alto y Safari no: con
-// pointerdown el iPad rechazaba la petición en silencio.
+// y el botón no sale; Safari en iPad sí (prefijado hasta iPadOS 16.4) y se
+// queda. Brave y Chrome en iPad son WebKit sin la pantalla completa activada:
+// dicen que no, y para probar esto hay que usar Safari.
+// Se pide en el click, no en pointerdown: en táctil el estándar solo cuenta como
+// gesto soltar el dedo, no apoyarlo. Chrome lo pasa por alto; el click vale en
+// todos.
+// El botón solo entra: para salir cada sistema pone lo suyo (la X de Safari en
+// iPad, Esc en escritorio, el gesto de atrás en Android), y un botón propio
+// duplicaba la X de Safari, encima de ella.
 const fsEl = document.getElementById("fs");
 const fsOK = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
-if (!fsOK) fsEl.style.display = "none";
+function syncFS(){
+  const on = document.fullscreenElement || document.webkitFullscreenElement;
+  fsEl.style.display = fsOK && !on ? "" : "none";
+}
+syncFS();
 function toggleFS(){
   if (!fsOK) return;
   const d = document.documentElement;
@@ -1794,7 +1805,7 @@ function toggleFS(){
 }
 fsEl.addEventListener("click", toggleFS);
 for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
-  document.addEventListener(ev, ()=>setTimeout(resize, 60));
+  document.addEventListener(ev, ()=>{ syncFS(); setTimeout(resize, 60); });
 addEventListener("keydown", e=>{ if (e.key==="f") toggleFS(); });
 
 // ─── dibujo ────────────────────────────────────────────────────────────────
