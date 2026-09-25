@@ -86,7 +86,9 @@
         border-radius:7px; background:rgba(30,34,60,.5); color:#9aa0cc;
         font-size:max(15px, calc(var(--u)*3.4));
         cursor:pointer; user-select:none; z-index:5; }
-  #fs { right:max(calc(var(--u)*2), env(safe-area-inset-right)); }
+  /* fullscreen va por click (ver toggleFS): manipulation quita el doble toque
+     que haría zoom en iOS y el retardo del click */
+  #fs { right:max(calc(var(--u)*2), env(safe-area-inset-right)); touch-action:manipulation; }
   #pz { left:max(calc(var(--u)*2), env(safe-area-inset-left)); gap:.26em; }
   /* las dos barras en CSS y no el glifo ⏸: en iOS y Android sale como emoji */
   #pz::before, #pz::after { content:""; width:.26em; height:.9em; border-radius:1px;
@@ -1774,20 +1776,25 @@ tapBtn(document.getElementById("restart"), restart);
 tapBtn(document.getElementById("again"), restart);
 
 // ─── fullscreen ────────────────────────────────────────────────────────────
+// Se pregunta al navegador si puede, no qué dispositivo es: el iPhone dice que no
+// y el botón no sale; el iPad sí (prefijado hasta iPadOS 16.4) y se queda.
+// Se pide en el click, no en pointerdown: solo cuenta como gesto del usuario
+// soltar el dedo, no apoyarlo. Chrome lo pasa por alto y Safari no: con
+// pointerdown el iPad rechazaba la petición en silencio.
 const fsEl = document.getElementById("fs");
+const fsOK = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+if (!fsOK) fsEl.style.display = "none";
 function toggleFS(){
+  if (!fsOK) return;
   const d = document.documentElement;
-  if (!document.fullscreenElement && !document.webkitFullscreenElement){
-    (d.requestFullscreen || d.webkitRequestFullscreen || (()=>{})).call(d);
-  } else {
-    (document.exitFullscreen || document.webkitExitFullscreen || (()=>{})).call(document);
-  }
+  const p = !document.fullscreenElement && !document.webkitFullscreenElement
+    ? (d.requestFullscreen || d.webkitRequestFullscreen).call(d)
+    : (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  if (p && p.catch) p.catch(()=>{});    // rechazo sin gesto válido: no hay nada que hacer
 }
-fsEl.addEventListener("pointerdown", e=>{ e.preventDefault(); e.stopPropagation(); toggleFS(); });
-document.addEventListener("fullscreenchange", ()=>{
-  fsEl.textContent = document.fullscreenElement ? "⛶" : "⛶";
-  setTimeout(resize, 60);
-});
+fsEl.addEventListener("click", toggleFS);
+for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
+  document.addEventListener(ev, ()=>setTimeout(resize, 60));
 addEventListener("keydown", e=>{ if (e.key==="f") toggleFS(); });
 
 // ─── dibujo ────────────────────────────────────────────────────────────────

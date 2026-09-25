@@ -26,7 +26,10 @@ orientativo: 80 líneas.
   (ancho > alto) los marcadores salen a los lados y la esfera llena la altura.
 - Sin detección de dispositivo. El input es la excepción a la regla anterior:
   sus umbrales (`DRAG_PX_*`, `SPEED_REF`) van en px a propósito, porque miden
-  dedo, no tablero.
+  dedo, no tablero. Se pregunta al navegador qué puede hacer, no qué es.
+- Lo que exige gesto del usuario (fullscreen, audio si llega) se pide en
+  `click`: en táctil, Safari no cuenta `pointerdown` como gesto y lo rechaza en
+  silencio; Chrome sí lo acepta, así que en Android no se nota.
 - La lógica no depende de la resolución ni de los fps: la misma semilla y el
   mismo input dan la misma partida en cualquier ventana y a cualquier ritmo de
   pantalla, también redimensionando a mitad de partida. Toda la lógica corre en
