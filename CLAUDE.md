@@ -73,7 +73,8 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   nada: `frame()` se reprograma a sí misma y el headless no termina.
 - Se avanza a mano con `updateGame(SIM_DT)`, con `Math.random` sembrado. Si la
   prueba pasa por `frame(now)` (cadencias, tope), antes `last = 0; acc = 0` y
-  `now` virtual.
+  `now` virtual. `frame()` no simula con `paused`, y cualquier `blur` o pestaña
+  oculta pausa: comprobar que la prueba no se quedó parada.
 - Sembrar no basta: hay que **volver a llamar a `reset()`** después, porque el
   del arranque ya consumió el `Math.random` real. Sin eso, dos corridas de la
   misma semilla divergen en el primer aterrizaje y el arnés miente.

@@ -71,33 +71,42 @@
              color:#cfd2e6; text-shadow:0 1px 6px rgba(4,4,12,.95);
              opacity:0; transition:opacity .6s ease; }
   .lvl-tip.on { opacity:1; transition:opacity .3s ease; }
-  .btn { min-width:132px; padding:0 16px; height:52px; border:1.5px solid #4a4f7a;
-         border-radius:8px; background:rgba(30,34,60,.55); color:#cfd2e6; font-size:15px;
-         letter-spacing:2px; font-family:inherit; display:flex; align-items:center;
+  .btn { min-width:max(132px, calc(var(--u)*34)); padding:0 max(16px, calc(var(--u)*4));
+         height:max(46px, calc(var(--u)*11)); border:1.5px solid #4a4f7a;
+         border-radius:8px; background:rgba(30,34,60,.55); color:#cfd2e6;
+         font-size:max(14px, calc(var(--u)*3.4)); letter-spacing:2px; font-family:inherit; display:flex; align-items:center;
          justify-content:center; user-select:none; cursor:pointer; }
   /* chrome, no HUD: se ancla a la esquina física de la pantalla, no a la
      columna. Anclado a la columna, en landscape --stage se estrecha y el botón
-     acaba flotando en mitad del viewport. */
-  #fs { position:fixed; top:max(calc(var(--u)*1.6), env(safe-area-inset-top));
-        right:max(calc(var(--u)*2), env(safe-area-inset-right));
+     acaba flotando en mitad del viewport. Pausa a la izquierda, fullscreen a la
+     derecha; los dos con la misma pieza. */
+  #fs, #pz { position:fixed; top:max(calc(var(--u)*1.6), env(safe-area-inset-top));
         width:max(34px, calc(var(--u)*7.7)); height:max(34px, calc(var(--u)*7.7));
         display:flex; align-items:center; justify-content:center; border:1.5px solid #3a3f68;
         border-radius:7px; background:rgba(30,34,60,.5); color:#9aa0cc;
         font-size:max(15px, calc(var(--u)*3.4));
         cursor:pointer; user-select:none; z-index:5; }
-  #fs:active { background:rgba(70,80,140,.75); }
+  #fs { right:max(calc(var(--u)*2), env(safe-area-inset-right)); }
+  #pz { left:max(calc(var(--u)*2), env(safe-area-inset-left)); gap:.26em; }
+  /* las dos barras en CSS y no el glifo ⏸: en iOS y Android sale como emoji */
+  #pz::before, #pz::after { content:""; width:.26em; height:.9em; border-radius:1px;
+        background:currentColor; }
+  #fs:active, #pz:active { background:rgba(70,80,140,.75); }
   .btn:active { background:rgba(70,80,140,.75); }
   .btn.arm { border-color:#f26b3a; color:#f26b3a; }
   /* sonda: JS no lee env(); resize() mide su alto para no meter la esfera
      bajo la muesca */
   #safe-top { position:fixed; top:0; left:0; width:0; height:env(safe-area-inset-top);
               visibility:hidden; pointer-events:none; }
-  #over { position:fixed; inset:0; display:none; flex-direction:column; gap:calc(var(--u)*2);
+  /* game over y pausa: el mismo telón, con la misma composición. Solo responden
+     los botones: un toque perdido no reanuda ni reinicia. El game over guarda el
+     hueco de CONTINUAR (.ghost) para que REINICIAR caiga en el mismo sitio. */
+  .ovl { position:fixed; inset:0; display:none; flex-direction:column; gap:calc(var(--u)*2);
           align-items:center; justify-content:center; background:rgba(4,4,10,.82);
-          color:#e8e8f4; font-size:max(16px, calc(var(--u)*4)); letter-spacing:2px;
-          cursor:pointer; }
-  #over b { font-size:max(26px, calc(var(--u)*6.9)); color:#f26b3a; letter-spacing:4px; }
-  #over small { font-size:max(11px, calc(var(--u)*2.65)); color:#8a8fb8; letter-spacing:1px; }
+          color:#e8e8f4; font-size:max(16px, calc(var(--u)*4)); letter-spacing:2px; }
+  .ovl b { font-size:max(26px, calc(var(--u)*6.9)); color:#f26b3a; letter-spacing:4px; }
+  .ovl .btn:first-of-type { margin-top:calc(var(--u)*2); }
+  .btn.ghost { visibility:hidden; }
 </style>
 </head>
 <body>
@@ -110,9 +119,13 @@
   <div class="lvl-n">NIVEL 1</div>
   <div class="lvl-tip"></div>
 </div>
+<div id="pz"></div>
 <div id="fs">⛶</div>
 <div id="safe-top"></div>
-<div id="over"><b>GAME OVER</b><span id="fin">0</span><small>toca para reiniciar</small></div>
+<div id="over" class="ovl"><b>GAME OVER</b><span id="fin">0</span>
+  <div class="btn ghost">CONTINUAR</div><div class="btn" id="again">REINICIAR</div></div>
+<div id="pause" class="ovl"><b>PAUSA</b><span id="pfin">0</span>
+  <div class="btn" id="resume">CONTINUAR</div><div class="btn" id="restart">REINICIAR</div></div>
 
 <script>
 "use strict";
@@ -426,7 +439,7 @@ function tutConsume(id){
 // El récord se perdía al cerrar la pestaña en pleno récord, que en móvil —que es
 // donde se juega— pasa constantemente. Los dos eventos porque ninguno dispara de
 // forma fiable en todos los navegadores; entre los dos cubren cerrar la pestaña,
-// cambiar de app en iOS y el bfcache. loseInput() no escribe: ya corre en blur y
+// cambiar de app en iOS y el bfcache. pause() no escribe: ya corre en blur y
 // mezclar responsabilidades ahí complica el rastreo.
 addEventListener("pagehide", flushIfDirty);
 document.addEventListener("visibilitychange", ()=>{ if (document.hidden) flushIfDirty(); });
@@ -559,7 +572,9 @@ function reset(){
   ptrDown = false; ptrId = null; ptrX = 0; energy = 0; lastMoveT = 0; ptrT = 0; ptrMoved = false;
   heldKeys = []; keyDir = 0; keyMode = "idle"; keyHoldT = 0; keyRamp = 0; keyIdleT = 0;
   bestSaved = false;
+  paused = false;
   document.getElementById("over").style.display = "none";
+  syncPause();
 }
 
 const safeTopEl = document.getElementById("safe-top");
@@ -1593,7 +1608,7 @@ const lerp = (a,b,p)=>a+(b-a)*p;
 function dragPx(){ return lerp(prof.DRAG_PX_SLOW, prof.DRAG_PX_FAST, energy); }
 function holdRate(){ return lerp(prof.HOLD_SLOW, prof.HOLD_FAST, energy); }
 
-const UI = "#fs, #over";
+const UI = "#fs, #pz, .ovl";
 
 // Modelo: el dedo manda.
 //  - dedo levantado      -> no gira
@@ -1681,6 +1696,12 @@ function recalcKeyDir(){
 
 addEventListener("keydown", e=>{
   if (dead && (e.key===" "||e.key==="Enter")){ reset(); return; }
+  // en pausa el teclado solo reanuda: nada se acumula para el tick de vuelta
+  if (paused){
+    if (e.key==="Escape"||e.code==="KeyP"||e.key===" "||e.key==="Enter"){ e.preventDefault(); resume(); }
+    return;
+  }
+  if (e.key==="Escape"||e.code==="KeyP"){ e.preventDefault(); pause(); return; }
   if (KEY_DIRS[e.code] !== undefined){
     e.preventDefault();
     setInputMode("desktop");
@@ -1709,10 +1730,40 @@ function loseInput(){
   ptrEnd(false);
   heldKeys = []; keyDir = 0; keyMode = "idle"; keyHoldT = 0; keyRamp = 0; keyIdleT = 0;
 }
-addEventListener("blur", loseInput);
-document.addEventListener("visibilitychange", ()=>{ if (document.hidden) loseInput(); });
 
-document.getElementById("over").addEventListener("pointerdown",reset);
+// ─── pausa ─────────────────────────────────────────────────────────────────
+// Con `paused` frame() no simula: el tiempo no corre y la partida queda idéntica
+// a como estaba; draw() sigue pintando por si cambia la ventana. Se entra por el
+// botón, por teclado (P, Esc) o al perder el foco. Perder el foco es cualquiera
+// de los tres: blur (Alt-Tab, clic fuera, barra de direcciones), pestaña oculta
+// y pagehide —iOS no siempre avisa de lo segundo al cambiar de app, y así el
+// bfcache devuelve la página ya en pausa—. Con la partida muerta no hay nada que
+// parar: manda el game over. Se sale solo a mano: volver no reanuda.
+let paused = false;
+const pzEl = document.getElementById("pz"), pauseEl = document.getElementById("pause");
+function syncPause(){
+  pauseEl.style.display = paused ? "flex" : "none";
+  pzEl.style.visibility = paused || dead ? "hidden" : "";
+}
+function pause(){
+  loseInput();               // Alt-Tab con algo pulsado no puede dejarlo girando
+  if (dead || paused) return;
+  paused = true;
+  document.getElementById("pfin").textContent = score+" puntos";
+  syncPause();
+}
+function resume(){ paused = false; syncPause(); }
+function restart(){ flushIfDirty(); reset(); }    // el récord no espera al game over
+addEventListener("blur", pause);
+addEventListener("pagehide", pause);
+document.addEventListener("visibilitychange", ()=>{ if (document.hidden) pause(); });
+function tapBtn(el, fn){
+  el.addEventListener("pointerdown", e=>{ e.preventDefault(); e.stopPropagation(); fn(); });
+}
+tapBtn(pzEl, pause);
+tapBtn(document.getElementById("resume"), resume);
+tapBtn(document.getElementById("restart"), restart);
+tapBtn(document.getElementById("again"), restart);
 
 // ─── fullscreen ────────────────────────────────────────────────────────────
 const fsEl = document.getElementById("fs");
@@ -2063,7 +2114,7 @@ function captureDrawPrev(){
 
 let last = performance.now(), acc = 0;
 function frame(now){
-  let e = Math.max(0, Math.min(MAX_ELAPSED, (now-last)/1000)); last = now;
+  let e = paused ? 0 : Math.max(0, Math.min(MAX_ELAPSED, (now-last)/1000)); last = now;
   const k = Math.round(e/SIM_DT);          // nunca a 0: a más de 1000 fps se congelaría
   if (k >= 1 && Math.abs(e - k*SIM_DT) < VSYNC_SNAP) e = k*SIM_DT;
   acc += e;
@@ -2079,6 +2130,7 @@ function frame(now){
     if (!bestSaved){ bestSaved = true; flushIfDirty(); }
     document.getElementById("over").style.display="flex";
     document.getElementById("fin").textContent = score+" puntos";
+    pzEl.style.visibility = "hidden";
   }
   requestAnimationFrame(frame);
 }

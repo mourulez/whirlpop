@@ -11,7 +11,8 @@ https://mourulez.github.io/whirlpop/
 - **Arrastrar**: gira el tablero.
 - **Mantener pulsado**: sigue girando mientras mantienes.
 - **Toque rápido**: hard drop (la pieza cae de golpe).
-- **Escritorio**: teclas ← / → para girar, ↓ para bajar, y `F` para pantalla completa.
+- **Pausa**: botón de arriba a la izquierda; también al cambiar de app, de pestaña o de ventana.
+- **Escritorio**: teclas ← / → para girar, ↓ para bajar, `P` o `Esc` para pausar y `F` para pantalla completa.
 
 ## Estado
 
