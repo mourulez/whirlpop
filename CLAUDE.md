@@ -43,11 +43,10 @@ orientativo: 80 líneas.
   sube el marcador. El bonus que no deja una sola bola en el tablero vale ×4 y
   lo cuenta igual: un texto que dobla dos veces, con el ritmo y los parámetros
   de la cascada. Ningún bonus carga el anillo.
-- Los bonus alternan: cada cierre del anillo entrega uno y deja cargado el
-  siguiente, y el aro se tiñe del color del que promete. De ahí que ningún tip
-  pueda llamar al anillo por su color. Son una tabla (`BONUS`), no casos
-  especiales: uno nuevo es una entrada con su color, su relleno de aro y su
-  molde de cráter, sin tocar quien los lanza, los cobra ni los dibuja.
+- Hay un solo bonus: la bomba, un disco alrededor del impacto, en naranja. Hubo
+  dos que alternaban (un barrido naranja hacia fuera y la bomba en turquesa) y se
+  dejó solo la bomba para simplificar. No se reintroduce un segundo bonus ni la
+  alternancia sin decidirlo antes.
 - La bola que no cabe se juzga antes de morir (hueco liberado o match desde
   fuera), pero solo espera una a la vez: sin cola. La espera dura un destello y
   en 16.000 partidas no llegó nunca una segunda; si llega, muere sin juicio.
