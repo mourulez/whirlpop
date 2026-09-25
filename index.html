@@ -1739,6 +1739,13 @@ function loseInput(){
 // y pagehide —iOS no siempre avisa de lo segundo al cambiar de app, y así el
 // bfcache devuelve la página ya en pausa—. Con la partida muerta no hay nada que
 // parar: manda el game over. Se sale solo a mano: volver no reanuda.
+// El selector de apps de iOS (arrastrar hacia arriba) no dispara ninguno de los
+// tres: la app queda inactiva, no oculta, y la miniatura sigue jugando. Lo único
+// que llega es el toque que el sistema le quita a la página: pointercancel. Con
+// touch-action:none el navegador no cancela nunca un toque por su cuenta, así
+// que uno táctil cancelado es siempre el sistema quedándose el gesto: inicio,
+// centro de control, notificaciones, el gesto de atrás de Android. Si el gesto
+// empieza fuera de la página —la barra inferior de Safari—, no llega nada.
 let paused = false;
 const pzEl = document.getElementById("pz"), pauseEl = document.getElementById("pause");
 function syncPause(){
@@ -1757,6 +1764,7 @@ function restart(){ flushIfDirty(); reset(); }    // el récord no espera al gam
 addEventListener("blur", pause);
 addEventListener("pagehide", pause);
 document.addEventListener("visibilitychange", ()=>{ if (document.hidden) pause(); });
+addEventListener("pointercancel", e=>{ if (e.pointerType !== "mouse") pause(); });
 function tapBtn(el, fn){
   el.addEventListener("pointerdown", e=>{ e.preventDefault(); e.stopPropagation(); fn(); });
 }
