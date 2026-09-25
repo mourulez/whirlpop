@@ -524,7 +524,8 @@ function reset(){
   flashT = 0; flashSet = new Set(); flashBonus = false;
   pendingBonus = null;
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
-  angle = angleT = anglePrev = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
+  angle = angleT = anglePrev = angleD0 = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
+  simTick = 0;
   spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; deadBall = outBall = null; lastColorAngle = null;
   forceK = null; prevSine = false; forceSine = null;
   // arranque en un nivel concreto (?nivel=N): toda la dificultad se deriva de
@@ -604,8 +605,10 @@ addEventListener("orientationchange", ()=>setTimeout(resize,120));
 // misma en cualquier ventana, también a mitad de un vuelo. Las constantes de
 // arrastre del input se quedan en px a propósito: miden dedo, no tablero.
 function toScreen(x,y){ return [ox + x*PS, oy + y*PS]; }
+// solo la usa el dibujo, y por eso gira con el ángulo interpolado: ver draw()
+let angleDraw = 0;
 function cellToScreen(fc,fr){
-  const lx=(fc-C)*CELL, ly=(fr-C)*CELL, s=Math.sin(angle), co=Math.cos(angle);
+  const lx=(fc-C)*CELL, ly=(fr-C)*CELL, s=Math.sin(angleDraw), co=Math.cos(angleDraw);
   return [ox + lx*co - ly*s, oy + lx*s + ly*co];
 }
 // El tablero GIRA, así que una posición del mundo no significa lo mismo en dos
@@ -752,8 +755,8 @@ function stepFlying(dt){
         // curva —+54% a 60 fps, +400% con hard drop a 20—, que es lo único que
         // rompía la velocidad uniforme que se pide arriba. El punto medio quita
         // ese error a paso normal; subdividir cubre los pasos largos del hard
-        // drop y del framerate bajo. Con las dos, 0% de desviación y 6 subpasos
-        // en el peor caso; a 60 fps y velocidad normal el bucle da una vuelta.
+        // drop. Con las dos, 0% de desviación; a velocidad normal el bucle da
+        // una vuelta.
         // `cal` mantiene la duración; el exponente reparte la velocidad. Los
         // subpasos se cuentan sobre el DESPLAZAMIENTO real, no sobre el avance
         // en el eje: con SINE_EASE bajo la bola vuela en los cruces y ahí es
@@ -832,9 +835,8 @@ const RAY_SAG = 0.02;
 // Lo que se recorre es el camino de la bola RELATIVO AL TABLERO, que es donde
 // viven las celdas. Con el tablero girando ese camino es un arco, no una recta,
 // y el error de trazarlo como cuerda crece con el cuadrado del giro del frame:
-// su flecha es r·(1−cos(φ/2)). El giro por frame no tiene tope —un arrastre
-// rápido pasa de 50°, y un frame largo descarga de golpe todo el retraso del
-// tween—, y con 20° en el borde la cuerda ya se mete 0.12 celdas: la bola
+// su flecha es r·(1−cos(φ/2)). El giro por tick no tiene tope —un arrastre
+// rápido pasa de 50°—, y con 20° en el borde la cuerda ya se mete 0.12 celdas: la bola
 // moría contra el borde del montón estando todavía fuera del campo, o aterrizaba
 // en una celda por la que nunca pasó. Así que el camino se trocea, y el número
 // de trozos no es un umbral de velocidad sino lo que exige que ninguna cuerda
@@ -1701,7 +1703,12 @@ function drawGauge(){
   cx.restore();
 }
 
-function draw(){
+// `alpha` es la fracción de tick transcurrida desde el último: se dibuja entre el
+// estado del tick anterior y el actual (ver captureDrawPrev()). El ángulo, las
+// fichas en vuelo y la cabeza de sus estelas se interpolan; lo demás avanza en
+// pasos de 60 Hz. No modifica nada de la partida.
+function draw(alpha){
+  angleDraw = lerp(angleD0, angle, alpha);
   // la matriz px CSS → buffer se repone en cada frame, no solo en resize(): el
   // navegador puede tirar el contexto de una pestaña que lleva rato en segundo
   // plano y devolverlo con el estado a cero, sin resize. Con la matriz identidad
@@ -1813,24 +1820,30 @@ function draw(){
     bubble(x,y, fill, rr, !fl);
   }
 
-  // el vuelo vive en el mundo; aquí, y solo aquí, pasa a pantalla
-  const trailPath = tr => {
+  // el vuelo vive en el mundo; aquí, y solo aquí, pasa a pantalla. La última
+  // muestra de la estela es la posición del tick actual, así que se cambia por la
+  // interpolada: la cabeza va pegada a la bola.
+  const trailPath = (tr, hx, hy) => {
     cx.beginPath();
     for (let i=0;i<tr.length;i++){
-      const [tx,ty]=toScreen(tr[i][0], tr[i][1]); i?cx.lineTo(tx,ty):cx.moveTo(tx,ty);
+      const last = i === tr.length-1;
+      const [tx,ty]=toScreen(last ? hx : tr[i][0], last ? hy : tr[i][1]);
+      i?cx.lineTo(tx,ty):cx.moveTo(tx,ty);
     }
   };
   for (const b of flying){
-    const [x,y] = toScreen(b.x, b.y);
+    const bx = b.dx0 === undefined ? b.x : lerp(b.dx0, b.x, alpha);
+    const by = b.dy0 === undefined ? b.y : lerp(b.dy0, b.y, alpha);
+    const [x,y] = toScreen(bx, by);
     if (b.bonus){
       const col = BOMB_COL;
-      trailPath(b.trail);
+      trailPath(b.trail, bx, by);
       cx.strokeStyle=rgba(col,0.45); cx.lineWidth=rad*0.5; cx.stroke();
       const pu = 1+0.18*Math.sin(t*18);
       bubble(x,y,col,rad*1.05*pu,true);
     } else {
       if (b.hard){
-        trailPath(b.trail);
+        trailPath(b.trail, bx, by);
         cx.strokeStyle="rgba(255,255,255,.30)"; cx.lineWidth=rad*0.9; cx.lineCap="round";
         cx.stroke();
       }
@@ -1864,10 +1877,28 @@ function mix(a,b,p){
 }
 
 // ─── loop ──────────────────────────────────────────────────────────────────
-let last = performance.now();
-function frame(now){
-  const dt = Math.min(0.05,(now-last)/1000); last = now;
+// Paso fijo: la partida avanza en ticks de SIM_DT, sea cual sea el ritmo al que
+// dibuje la pantalla, así que la misma semilla y el mismo input dan la misma
+// partida a 30, 60 o 144 fps. Con `dt` variable no lo era: los seguimientos
+// `min(1, k·dt)` y los umbrales que se cruzan en el frame que toque dependían del
+// ritmo. 1/60 es el `dt` con el que se calibró todo el juego.
+const SIM_DT = 1/60;
+// Tope de tiempo por frame: 6 ticks. Hasta 10 fps el juego va a su velocidad;
+// por debajo se ralentiza en vez de dar saltos de medio segundo.
+const MAX_ELAPSED = 0.1;
+// A 60 Hz requestAnimationFrame no llega cada 16,67 ms exactos: sin redondear, las
+// pequeñas variaciones alternan frames de 0 y 2 ticks. Lo que cae a menos de
+// VSYNC_SNAP de un múltiplo del tick se toma como ese múltiplo.
+const VSYNC_SNAP = 0.001;
+// tolerancia del acumulador: que la coma flotante no se coma un tick que vale
+// casi exactamente SIM_DT, por ejemplo a 30 fps
+const ACC_EPS = 1e-6;
+let simTick = 0;                           // ticks de la partida: solo para las pruebas
 
+// Toda la lógica de un tick. Lo visual que avanza con la partida —anillo,
+// flotantes, asentamiento del grid— también va aquí: es determinista igual.
+function updateGame(dt){
+  simTick++;
   if (!dead){
     t += dt;
     // progresión: `t` manda y `level` se deriva. El último nivel es terminal.
@@ -1914,8 +1945,8 @@ function frame(now){
       rotT -= dt;
       if (rotT <= 0){ rotate(dir); rotT = holdRate(); }
     } else rotT = 0;
-    // el ángulo con el que se dibujó el frame anterior; rayCast() lo necesita para
-    // leer dónde estaba cada bola EN EL TABLERO, no en la pantalla.
+    // el ángulo del tick anterior; rayCast() lo necesita para leer dónde estaba
+    // cada bola EN EL TABLERO, no en la pantalla.
     anglePrev = angle;
     angle += (angleT-angle)*Math.min(1,ROT_TWEEN*dt);
 
@@ -1949,8 +1980,28 @@ function frame(now){
   stepFlash(dt);
   easeVisual(dt);
   stepFloaters(dt);
+}
 
-  draw();
+// Estado del tick anterior, para que draw() interpole entre él y el actual. Sin
+// interpolar, a 120 Hz se alternan frames de 1 y 0 ticks y el giro da tirones.
+// No se reutilizan anglePrev ni b.px/b.py: esos solo avanzan con la partida viva,
+// y tras morir el dibujo temblaría entre dos valores. Esto se copia en todos los
+// ticks, viva o no. Una ficha nacida en el tick no tiene copia y se dibuja donde está.
+let angleD0 = 0;
+function captureDrawPrev(){
+  angleD0 = angle;
+  for (const b of flying){ b.dx0 = b.x; b.dy0 = b.y; }
+}
+
+let last = performance.now(), acc = 0;
+function frame(now){
+  let e = Math.max(0, Math.min(MAX_ELAPSED, (now-last)/1000)); last = now;
+  const k = Math.round(e/SIM_DT);          // nunca a 0: a más de 1000 fps se congelaría
+  if (k >= 1 && Math.abs(e - k*SIM_DT) < VSYNC_SNAP) e = k*SIM_DT;
+  acc += e;
+  while (acc >= SIM_DT - ACC_EPS){ captureDrawPrev(); updateGame(SIM_DT); acc -= SIM_DT; }
+  draw(Math.max(0, acc)/SIM_DT);
+
   document.getElementById("score").textContent = score;
   // el récord se mueve durante la partida, en espejo con el marcador de arriba:
   // superarlo es un momento de juego, no un dato de menú.
@@ -1963,6 +2014,11 @@ function frame(now){
   }
   requestAnimationFrame(frame);
 }
+// El tiempo pasado en otra pestaña no se simula: se descarta al volver. La marca
+// del primer frame puede ser anterior a este instante, y ahí `e` se satura a 0.
+document.addEventListener("visibilitychange", ()=>{
+  if (!document.hidden){ last = performance.now(); acc = 0; }
+});
 
 resize(); reset(); requestAnimationFrame(frame);
 </script>

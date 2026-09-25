@@ -26,8 +26,12 @@ orientativo: 80 líneas.
 - Sin detección de dispositivo. El input es la excepción a la regla anterior:
   sus umbrales (`DRAG_PX_*`, `SPEED_REF`) van en px a propósito, porque miden
   dedo, no tablero.
-- La lógica no depende de la resolución: la misma semilla da la misma partida
-  en cualquier ventana, también redimensionando a mitad de partida.
+- La lógica no depende de la resolución ni de los fps: la misma semilla y el
+  mismo input dan la misma partida en cualquier ventana y a cualquier ritmo de
+  pantalla, también redimensionando a mitad de partida. Toda la lógica corre en
+  `updateGame()`, a ticks fijos de `SIM_DT` (1/60); `draw(alpha)` interpola entre
+  el tick anterior y el actual y no modifica nada de la partida. Los listeners de
+  input solo tocan estado que el tick siguiente lee al empezar.
 
 ## Decisiones cerradas
 
@@ -58,9 +62,9 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 - Se genera una copia de `index.html` con un `<script>` extra tras el
   principal, y se sustituyen **todas** las `requestAnimationFrame(frame);` por
   nada: `frame()` se reprograma a sí misma y el headless no termina.
-- Se avanza a mano con `frame(now)` y `dt` fijo, con `Math.random` sembrado.
-  Antes del primer frame, `last = 0`: arranca con el `performance.now()` real y
-  el primer `dt` rompe el determinismo, incluso de `HEAD` contra `HEAD`.
+- Se avanza a mano con `updateGame(SIM_DT)`, con `Math.random` sembrado. Si la
+  prueba pasa por `frame(now)` (cadencias, tope), antes `last = 0; acc = 0` y
+  `now` virtual.
 - Sembrar no basta: hay que **volver a llamar a `reset()`** después, porque el
   del arranque ya consumió el `Math.random` real. Sin eso, dos corridas de la
   misma semilla divergen en el primer aterrizaje y el arnés miente.
