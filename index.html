@@ -88,9 +88,7 @@
         border-radius:7px; background:rgba(30,34,60,.5); color:#9aa0cc;
         font-size:max(15px, calc(var(--u)*3.4));
         cursor:pointer; user-select:none; z-index:5; }
-  /* fullscreen va por click (ver toggleFS): manipulation quita el doble toque
-     que haría zoom en iOS y el retardo del click */
-  #fs { left:max(calc(var(--u)*2), env(safe-area-inset-left)); touch-action:manipulation; }
+  #fs { left:max(calc(var(--u)*2), env(safe-area-inset-left)); }
   #pz { right:max(calc(var(--u)*2), env(safe-area-inset-right)); gap:.26em; }
   /* las dos barras en CSS y no el glifo ⏸: en iOS y Android sale como emoji */
   #pz::before, #pz::after { content:""; width:.26em; height:.9em; border-radius:1px;
@@ -1782,9 +1780,6 @@ tapBtn(document.getElementById("again"), restart);
 // y el botón no sale; Safari en iPad sí (prefijado hasta iPadOS 16.4) y se
 // queda. Brave y Chrome en iPad son WebKit sin la pantalla completa activada:
 // dicen que no, y para probar esto hay que usar Safari.
-// Se pide en el click, no en pointerdown: en táctil el estándar solo cuenta como
-// gesto soltar el dedo, no apoyarlo. Chrome lo pasa por alto; el click vale en
-// todos.
 // El botón solo entra: para salir cada sistema pone lo suyo (la X de Safari en
 // iPad, Esc en escritorio, el gesto de atrás en Android), y un botón propio
 // duplicaba la X de Safari, encima de ella.
@@ -1803,7 +1798,7 @@ function toggleFS(){
     : (document.exitFullscreen || document.webkitExitFullscreen).call(document);
   if (p && p.catch) p.catch(()=>{});    // rechazo sin gesto válido: no hay nada que hacer
 }
-fsEl.addEventListener("click", toggleFS);
+fsEl.addEventListener("pointerdown", e=>{ e.preventDefault(); e.stopPropagation(); toggleFS(); });
 for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
   document.addEventListener(ev, ()=>{ syncFS(); setTimeout(resize, 60); });
 addEventListener("keydown", e=>{ if (e.key==="f") toggleFS(); });
