@@ -1748,6 +1748,11 @@ function loseInput(){
 // que uno táctil cancelado es siempre el sistema quedándose el gesto: inicio,
 // centro de control, notificaciones, el gesto de atrás de Android. Si el gesto
 // empieza fuera de la página —la barra inferior de Safari—, no llega nada.
+// Tampoco en Brave para iPad: su interfaz se queda el toque antes de que llegue
+// a la página (medido con un registro de eventos: ni pointerdown). Safari y
+// Chrome en iPad, también WebKit, sí pausan. No es cosa del motor ni tiene
+// arreglo desde aquí: ningún navegador avisa al entrar en el selector
+// (w3c/page-visibility#59, WebKit 205942).
 let paused = false;
 const pzEl = document.getElementById("pz"), pauseEl = document.getElementById("pause");
 function syncPause(){
