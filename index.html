@@ -24,6 +24,7 @@
           --u: calc(var(--stage) / 100); }
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { width:100%; height:100%; overflow:hidden; background:#06060c;
+              overscroll-behavior:none;   /* sin "página anterior" al girar con trackpad */
               user-select:none; -webkit-user-select:none;
               font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
   #c { display:block; width:100%; height:100%; touch-action:none; }
@@ -618,7 +619,7 @@ const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,DPR,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
 let grid, angle, angleT, anglePrev, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, deadBall, outBall, nextSpawn, whiteT, lastColorAngle;
 let level, tipT, gaugeEarly, forceK, prevSine, forceSine;
-let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved;
+let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved, wheelAcc;
 let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
 let bestSaved;
 
@@ -849,7 +850,7 @@ function reset(){
   { const aArc = Math.random()*Math.PI*2;
     nextSpawn = { aArc, a: aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82,
                   k: Math.floor(Math.random()*4) }; }  // arranque: sin morado
-  dir = 0; rotT = 0; dragAcc = 0;
+  dir = 0; rotT = 0; dragAcc = 0; wheelAcc = 0;
   ptrDown = false; ptrId = null; ptrX = 0; energy = 0; lastMoveT = 0; ptrT = 0; ptrMoved = false;
   heldKeys = []; keyDir = 0; keyMode = "idle"; keyHoldT = 0; keyRamp = 0; keyIdleT = 0;
   bestSaved = false;
@@ -2018,6 +2019,31 @@ function wakeCursor(){
 }
 cv.addEventListener("pointermove", ()=>{ if (!ptrDown) wakeCursor(); }, {passive:true});
 wakeCursor();
+
+// ── trackpad ──────────────────────────────────────────────────────────────
+// Dos dedos en horizontal giran como un arrastre: llega como `wheel` y no pasa
+// por el puntero, así que tiene su propio acumulador y convive con arrastre y
+// teclado sin tocar su estado. Solo el eje X: el vertical giraría el tablero con
+// cualquier scroll sin querer. Con ctrlKey es el pellizco de zoom: no es nuestro.
+// preventDefault (y overscroll-behavior en el CSS) evita que el deslizamiento
+// horizontal de macOS sea "página anterior" y te saque del juego. La inercia de
+// macOS sigue mandando eventos un rato tras levantar los dedos y la web no la
+// distingue de los reales: el tablero sigue girando un poco, como un impulso.
+// También lo usan los touchpads de Windows y las ruedas que se inclinan.
+const WHEEL_PX   = 20;   // px de desplazamiento por paso; pendiente de calibrar en Mac y Windows
+const WHEEL_SIGN = -1;   // desplazamiento natural (Mac): dedos a la derecha dan deltaX < 0
+addEventListener("wheel", e=>{
+  if (e.ctrlKey) return;
+  e.preventDefault();
+  if (paused || dead || !e.deltaX) return;
+  const px = e.deltaX * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerWidth : 1);
+  wheelAcc += WHEEL_SIGN * px;
+  if (Math.abs(wheelAcc) < WHEEL_PX) return;
+  const d = Math.sign(wheelAcc);
+  while (Math.abs(wheelAcc) >= WHEEL_PX){ rotate(d); wheelAcc -= d*WHEEL_PX; }
+  setInputMode("desktop");
+  ctrlTurn = true;                       // giro efectivo: avanza la fase A del tutorial
+}, {passive:false});
 
 // ── teclado ───────────────────────────────────────────────────────────────
 // Toque corto = un paso discreto exacto. Mantenido = velocidad angular creciente.
