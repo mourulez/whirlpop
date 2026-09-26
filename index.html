@@ -27,6 +27,7 @@
               user-select:none; -webkit-user-select:none;
               font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
   #c { display:block; width:100%; height:100%; touch-action:none; }
+  #c.nocur { cursor:none; }       /* ver "cursor" en el input */
   /* HUD: pertenece a la columna, se reparte sobre --stage y escala con --u.
      Los dos marcadores viven abajo, en fila y con la misma composición —etiqueta
      encima, número debajo—, dejando toda la mitad superior libre. En landscape,
@@ -1954,6 +1955,7 @@ cv.addEventListener("pointerdown", e=>{
   setInputMode(e.pointerType === "mouse" ? "desktop" : "touch");
   ptrId = e.pointerId;
   try { cv.setPointerCapture(e.pointerId); } catch(_){}
+  hideCursor();
   ptrDown = true; dragAcc = 0; dir = 0; rotT = 0; energy = 0;
   ptrX = e.clientX; lastMoveT = performance.now();
   ptrT = performance.now(); ptrMoved = false;
@@ -1995,6 +1997,27 @@ cv.addEventListener("pointerup", e=>{ if (e.pointerId === ptrId) ptrEnd(true); }
 cv.addEventListener("pointercancel", e=>{ if (e.pointerId === ptrId) ptrEnd(false); });
 cv.addEventListener("lostpointercapture", e=>{ if (e.pointerId === ptrId) ptrEnd(false); });
 cv.addEventListener("contextmenu", e=> e.preventDefault());
+
+// ── cursor ────────────────────────────────────────────────────────────────
+// Jugando sobra: el arrastre mide cuánto se mueve el ratón, no dónde está, y con
+// teclado solo tapa el tablero. Se oculta al pulsar sobre el lienzo —la captura
+// lo mantiene oculto aunque el arrastre salga de él— y tras CURSOR_IDLE_MS
+// quieto. Vuelve al moverlo sin botón, para llegar a pausa o a pantalla completa.
+// En pausa y game over no se oculta, y de todos modos el telón tapa el lienzo con
+// su propio cursor. Es interfaz, no partida: va a reloj real, fuera del tick.
+const CURSOR_IDLE_MS = 2000;
+let cursorT = 0;
+function hideCursor(){ clearTimeout(cursorT); cv.classList.add("nocur"); }
+function wakeCursor(){
+  cv.classList.remove("nocur");
+  clearTimeout(cursorT);
+  cursorT = setTimeout(function idle(){
+    if (paused || dead) cursorT = setTimeout(idle, CURSOR_IDLE_MS);
+    else cv.classList.add("nocur");
+  }, CURSOR_IDLE_MS);
+}
+cv.addEventListener("pointermove", ()=>{ if (!ptrDown) wakeCursor(); }, {passive:true});
+wakeCursor();
 
 // ── teclado ───────────────────────────────────────────────────────────────
 // Toque corto = un paso discreto exacto. Mantenido = velocidad angular creciente.
