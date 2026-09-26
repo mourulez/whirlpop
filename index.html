@@ -43,30 +43,33 @@
                padding:0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
   .wide .hblock { width:calc(50vw - var(--chord) - env(safe-area-inset-left)); }
   .wide .hblock + .hblock { width:calc(50vw - var(--chord) - env(safe-area-inset-right)); }
-  /* .lvl-n comparte la regla de las etiquetas del HUD, no la copia: "NIVEL 3" es
-     rótulo, del mismo rango que SCORE, no un dato que se consulte. En una sola
-     regla no pueden separarse al retocar cualquiera de las dos. */
-  .hlabel, .lvl-n { font-size:max(12px, calc(var(--u)*2.9)); letter-spacing:2px;
+  .hlabel { font-size:max(12px, calc(var(--u)*2.9)); letter-spacing:2px;
             line-height:1.3; color:#5c6090; }
   .hval   { font-size:max(22px, calc(var(--u)*6.2)); letter-spacing:1px;
             line-height:1.3; color:#cfd2e6; }
-  /* Nivel y micro-tutorial: mismo esqueleto que el HUD, en la franja de arriba.
-     Ninguno reserva altura: la esfera se coloca como si no estuvieran y los dos
-     se superponen sobre la franja alta del área de juego. El tip es absolute
-     respecto al bloque, así que la esfera tampoco salta al aparecer ni al irse
-     el texto. */
+  /* Micro-tutorial: mismo esqueleto que el HUD, en la franja de arriba. No
+     reserva altura: la esfera se coloca como si no estuviera y el tip se
+     superpone sobre la franja alta del área de juego. Es absolute respecto al
+     bloque, así que la esfera tampoco salta al aparecer ni al irse el texto. */
   #lvl { position:fixed; left:50%; transform:translateX(-50%); width:var(--stage);
          top:max(calc(var(--u)*2.4), env(safe-area-inset-top));
          text-align:center; pointer-events:none; }
   /* El tip es la única prosa del juego: se lee una vez, corriendo y a contrarreloj.
      Rompe el monoespaciado del resto de la interfaz a propósito —una frase larga
-     en mono se lee peor— y se separa de la línea de nivel para que no se lean
-     como un mismo bloque. El fade es asimétrico: entra rápido para no hacerse
-     esperar, sale despacio para no cortar al que todavía está leyendo; la clase
-     .on conmuta las dos duraciones. */
-  .lvl-tip { position:absolute; top:calc(100% + var(--u)*3.2); left:50%;
+     en mono se lee peor—. Baja lo que ocupaba el rótulo de nivel que tenía encima
+     más su aire (hoy 9,4u desde arriba): así pasa justo por debajo de los botones
+     de las esquinas, que llegan a 9,3u. El fade es asimétrico: entra rápido para
+     no hacerse esperar, sale despacio para no cortar al que todavía está leyendo;
+     la clase .on conmuta las dos duraciones.
+     Los suelos en px mandan en el móvil en vertical, donde la columna es el ancho
+     de la pantalla y 3,6u se queda en 14 px: con el suelo de 15 no se leía en un
+     móvil real. 18 px es cuerpo de lectura de móvil, y el ancho mínimo de 360 px
+     (sin pasar del borde) evita que el texto más largo apile cuatro líneas sobre
+     la esfera. En escritorio y tablet la columna ya los supera y no cambia nada. */
+  .lvl-tip { position:absolute; top:calc(max(15.6px, var(--u)*3.77) + var(--u)*3.2); left:50%;
              transform:translateX(-50%);
-             width:84%; font-size:max(15px, calc(var(--u)*3.6)); line-height:1.5;
+             width:max(84%, min(100% - 24px, 360px));
+             font-size:max(18px, calc(var(--u)*3.6)); line-height:1.5;
              font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
              color:#cfd2e6; text-shadow:0 1px 6px rgba(4,4,12,.95);
              opacity:0; transition:opacity .6s ease; }
@@ -152,6 +155,20 @@
   .ovl b { font-size:max(26px, calc(var(--u)*6.9)); color:#f26b3a; letter-spacing:4px; }
   .ovl .btn:first-of-type { margin-top:calc(var(--u)*2); }
   .btn.ghost { visibility:hidden; }
+  /* volver a ver los tutoriales: fuera de la composición centrada del telón,
+     anclado abajo y con aspecto de enlace, para no competir con los botones.
+     En columna va justo encima del HUD —su bottom más la altura de etiqueta y
+     número, suelos incluidos— para no pisar los marcadores, que se transparentan
+     bajo el telón; en .wide están a los lados y baja hasta el borde. */
+  .tut-again { position:absolute; left:50%; transform:translateX(-50%);
+               bottom:calc(max(calc(var(--u)*3), env(safe-area-inset-bottom))
+                           + max(15.6px, calc(var(--u)*3.77)) + max(28.6px, calc(var(--u)*8.06))
+                           + var(--u)*2);
+               padding:calc(var(--u)*2) calc(var(--u)*4); white-space:nowrap;
+               font-size:max(13px, calc(var(--u)*3)); letter-spacing:1px; color:#9aa0cc;
+               text-decoration:underline; text-underline-offset:.25em; cursor:pointer; }
+  .wide .tut-again { bottom:max(calc(var(--u)*3), env(safe-area-inset-bottom)); }
+  .tut-again:active { color:#cfd2e6; }
 </style>
 </head>
 <body>
@@ -167,20 +184,21 @@
 </svg>
 <canvas id="c"></canvas>
 <div id="hud">
-  <div class="hblock"><span class="hlabel">SCORE</span><span class="hval" id="score">0</span></div>
-  <div class="hblock"><span class="hlabel">PERSONAL BEST</span><span class="hval" id="bestv">0</span></div>
+  <div class="hblock"><span class="hlabel">PUNTOS</span><span class="hval" id="score">0</span></div>
+  <div class="hblock"><span class="hlabel">MI RÉCORD</span><span class="hval" id="bestv">0</span></div>
 </div>
 <div id="lvl">
-  <div class="lvl-n">NIVEL 1</div>
   <div class="lvl-tip"></div>
 </div>
 <div id="pz"></div>
 <div id="fs">⛶</div>
 <div id="safe-top"></div>
-<div id="over" class="ovl"><b>GAME OVER</b><span id="fin">0</span>
-  <div class="btn ghost">CONTINUAR</div><div class="btn" id="again">REINICIAR</div></div>
+<div id="over" class="ovl"><b>FIN DE PARTIDA</b><span id="fin">0</span>
+  <div class="btn ghost">CONTINUAR</div><div class="btn" id="again">REINICIAR</div>
+  <div class="tut-again">Jugar de nuevo al tutorial</div></div>
 <div id="pause" class="ovl"><b>PAUSA</b><span id="pfin">0</span>
-  <div class="btn" id="resume">CONTINUAR</div><div class="btn" id="restart">REINICIAR</div></div>
+  <div class="btn" id="resume">CONTINUAR</div><div class="btn" id="restart">REINICIAR</div>
+  <div class="tut-again">Jugar de nuevo al tutorial</div></div>
 
 <script>
 "use strict";
@@ -312,7 +330,7 @@ const WHITE = 8, STONE = 9;                // fuera del rango de índices de col
 const PAINT = { 8:"#eef0f6", 9:"#484c5c" };
 function numColors(){ return level >= 5 ? 5 : 4; }
 // El sistema de carga es la única mecánica que puede adelantarse al calendario:
-// con su tutorial ya leído tres veces está disponible desde el frame cero. El
+// con su tutorial ya leído está disponible desde el frame cero. El
 // resto de elementos conserva su reloj y solo pierde el tip. `gaugeEarly` se
 // congela en reset(), así que el desbloqueo nunca entra a mitad de partida.
 function gaugeOn(){ return level >= 4 || gaugeEarly; }
@@ -474,13 +492,11 @@ function setInputMode(m){
   inputMode = m;
   if (ctrlPhase) renderCtrl();
 }
-const lvlNEl = document.querySelector(".lvl-n");
 const tipEl  = document.querySelector(".lvl-tip");
-// Único punto donde se decide si hay tip: tras tres lecturas completas el nivel
-// abre con el número a secas. Con tipT a 0 y sin fase el bloque de fade de
-// updateGame() no tiene nada que hacer y setInputMode() tampoco reescribe nada.
+// Único punto donde se decide si hay tip: tras una lectura completa el nivel
+// abre sin él. Con tipT a 0 y sin fase el bloque de fade de updateGame() no
+// tiene nada que hacer y setInputMode() tampoco reescribe nada.
 function showLevel(){
-  lvlNEl.textContent = "NIVEL " + level;
   tipT = 0; ctrlPhase = null;
   if (level === 1 ? !ctrlPending() : tutSeen(LEVELS[level-1].id)){
     tipEl.classList.remove("on"); return;
@@ -515,7 +531,9 @@ let bestSaved;
 // defecto —quien prueba la demo en los dos ve los tutoriales en los dos.
 const SAVE_KEY = "whirlpop.save";
 const BEST_KEY = "whirlpop.best";      // clave heredada: solo guardaba el récord
-const SAVE_V = 1, TUT_MAX = 3;
+// Cada tip sale una sola vez: una lectura completa lo da por visto. Para verlos
+// otra vez está "jugar de nuevo al tutorial" (ver replayTutorial()).
+const SAVE_V = 1, TUT_MAX = 1;
 const TUT_IDS = LEVELS.map(l => l.id);
 
 function lsGet(k){ try { return localStorage.getItem(k); } catch(_){ return null; } }
@@ -570,12 +588,12 @@ addEventListener("pagehide", flushIfDirty);
 document.addEventListener("visibilitychange", ()=>{ if (document.hidden) flushIfDirty(); });
 
 // Arranque del almacén con los dos atajos de prueba encima: ?reset=1 borra y
-// empieza limpio, ?tut=3 pone todos los contadores a 3 —sin tutoriales y con la
-// carga desbloqueada—. Se quitan de la URL para que un F5 no los repita: jugar
+// empieza limpio, ?tut=1 da todos los tutoriales por vistos —sin tips y con la
+// carga desbloqueada; un número mayor se satura—. Se quitan de la URL para que un F5 no los repita: jugar
 // seis minutos, o borrar la clave a mano en el móvil —donde eso exige depuración
 // remota—, no es forma de probar esto. ?nivel=N adelanta el reloj de partida al
 // `at` de ese nivel: ninguna lógica de juego se entera, porque toda la dificultad
-// se deriva de `t`. ?nivel=6&tut=3 da nivel 6 limpio y con el anillo desbloqueado.
+// se deriva de `t`. ?nivel=6&tut=1 da nivel 6 limpio y con el anillo desbloqueado.
 let startLevel = 1;
 (function bootSave(){
   const q = new URLSearchParams(location.search);
@@ -740,11 +758,12 @@ function reset(){
 const safeTopEl = document.getElementById("safe-top");
 const hudBlocks = document.querySelectorAll("#hud .hblock");
 const hudLabels = document.querySelectorAll("#hud .hlabel");
+const hudVals   = document.querySelectorAll("#hud .hval");
 
 // En landscape sobra pantalla a los lados de la columna. Si en esas franjas caben
 // los marcadores, salen de debajo de la esfera y la columna ya solo tiene que
 // abarcar el halo, con WIDE_AIR hasta el borde arriba y abajo: la esfera crece.
-// "NIVEL X" y el tip no reservan sitio; se superponen. Devuelve el STAGE de ese
+// El tip no reserva sitio; se superpone. Devuelve el STAGE de ese
 // reparto y la semicuerda del halo a la altura de los marcadores (lo que el halo
 // quita a su franja), o null si no supera al de la columna (col).
 // Solo con ventana más ancha que alta, por decisión: en portrait los marcadores
@@ -761,10 +780,13 @@ function wideStage(col){
   root.classList.add("wide");
   // los textos tienen suelo en px: se miden, no se calculan. Todo se mide a
   // hMax, que es el peor caso: con un STAGE menor el HUD encoge y baja.
-  // Manda la etiqueta más ancha; un marcador de seis cifras es más estrecho que
-  // PERSONAL BEST a cualquier escala.
+  // Manda lo más ancho de cada marcador: su etiqueta o un número de seis cifras,
+  // que ya pasa a MI RÉCORD. El número se mide con el que haya escrito: la fuente
+  // es monoespaciada, así que cada cifra ocupa lo mismo.
   let lab = 0;
   for (const e of hudLabels) lab = Math.max(lab, e.getBoundingClientRect().width);
+  for (const e of hudVals)
+    lab = Math.max(lab, e.getBoundingClientRect().width / Math.max(1, e.textContent.length) * 6);
   // los marcadores van abajo, donde el círculo es más estrecho: la franja libre
   // se mide a la altura de su borde superior, no en el ecuador
   const dy = hudBlocks[0].getBoundingClientRect().top - H/2;
@@ -821,7 +843,7 @@ function resize(){
   // uno, a partir de cierta esbeltez la esfera volvía a bajar al estrechar la
   // pantalla. Guarda: la zona de spawn y el aviso suben con ella y no deben
   // salirse por arriba ni meterse en el margen seguro (la muesca, en pantalla
-  // completa). "NIVEL X" y el tip no reservan sitio: se superponen.
+  // completa). El tip no reserva sitio: se superpone.
   // En .wide no sube: la esfera ya llena la altura y va centrada.
   let lift = 0;
   if (!wide){
@@ -1951,6 +1973,7 @@ function pause(){
   if (dead || paused) return;
   paused = true;
   document.getElementById("pfin").textContent = score+" puntos";
+  syncTutAgain();
   syncPause();
 }
 function resume(){ paused = false; syncPause(); }
@@ -1966,6 +1989,21 @@ tapBtn(pzEl, pause);
 tapBtn(document.getElementById("resume"), resume);
 tapBtn(document.getElementById("restart"), restart);
 tapBtn(document.getElementById("again"), restart);
+// Volver a ver los tutoriales: todos los contadores a cero y partida nueva desde
+// el nivel 1, con el guion de controles y su montón. Solo sale si hay algo que
+// repetir; se decide al abrir el telón, no en cada frame.
+const tutAgainEls = document.querySelectorAll(".tut-again");
+function syncTutAgain(){
+  const any = TUT_IDS.some(id => tutCount(id) > 0);
+  for (const e of tutAgainEls) e.style.display = any ? "" : "none";
+}
+function replayTutorial(){
+  for (const id of TUT_IDS) save.tut[id] = 0;
+  flushSave();
+  startLevel = 1;
+  restart();
+}
+tutAgainEls.forEach(e => tapBtn(e, replayTutorial));
 
 // ─── fullscreen ────────────────────────────────────────────────────────────
 // Se pregunta al navegador si puede, no qué dispositivo es: el iPhone dice que no
@@ -2355,7 +2393,7 @@ function frame(now){
   if (score > bestScore){ bestScore = score; save.best = bestScore; saveDirty = true; }
   bestEl.textContent = bestScore;
   if (dead){
-    if (!bestSaved){ bestSaved = true; flushIfDirty(); }
+    if (!bestSaved){ bestSaved = true; flushIfDirty(); syncTutAgain(); }
     document.getElementById("over").style.display="flex";
     document.getElementById("fin").textContent = score+" puntos";
     pzEl.style.visibility = "hidden";

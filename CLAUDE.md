@@ -57,8 +57,8 @@ orientativo: 80 líneas.
   en 16.000 partidas no llegó nunca una segunda; si llega, muere sin juicio.
 - Portrait es una Game Boy: pantalla arriba, pulgares abajo. La esfera sube
   siempre hasta la guarda superior, sin tope propio: con tope, al estrechar la
-  pantalla volvía a bajar. "NIVEL X" y el tip no reservan altura en ningún
-  layout: se superponen (el nivel va a desaparecer).
+  pantalla volvía a bajar. El tip no reserva altura en ningún layout: se
+  superpone. No hay rótulo de nivel.
 - Portrait ancho (tablet en vertical, alto/ancho < 1.55) se queda con la columna
   0.645 y el HUD centrado debajo. La ergonomía Game Boy es de móvil (no hay
   móviles 4:3): no se rediseña el tablet por los pulgares. Se propuso abrir ahí
@@ -68,6 +68,10 @@ orientativo: 80 líneas.
   retiene en el `at` del nivel 2, que no abre hasta consumirlo. Los niveles no se
   solapan con él.
 - No hay colores nuevos: el nivel 7 es el último. El rosa (nivel 8) se quitó.
+- Cada tip sale una sola vez. Para verlos otra vez, "Jugar de nuevo al
+  tutorial" en pausa y en fin de partida (solo si hay algo visto).
+- Toda la interfaz en castellano (PUNTOS, MI RÉCORD, FIN DE PARTIDA). "Match"
+  y "combo" se aceptan en los tips.
 
 ## Verificación
 
@@ -89,7 +93,8 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   (`--enable-logging=stderr --v=0`) antes que sospechar del juego.
 - La ventana se simula redefiniendo `innerWidth`/`innerHeight` y llamando a
   `resize()`, pero eso no mueve el CSS (`vw`, HUD): para el layout, ventana real
-  con `--window-size`. El viewport sale 16×95 px menor y nunca baja de 500 de ancho.
+  con `--window-size`. El viewport sale 16×95 px menor y nunca baja de 500 de ancho:
+  para un móvil real, un `<iframe>` del tamaño exacto dentro de la página capturada.
 - El input se simula despachando `PointerEvent`/`KeyboardEvent` reales, con
   `performance.now` redefinido al reloj virtual: el arrastre mide con él.
   Una partida entera dibujando cada frame tarda ~20 s: lanzar lotes en segundo plano.
@@ -105,7 +110,7 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   fundido.
 - Perfil nuevo por ejecución (`--user-data-dir`): el guardado de `localStorage`
   cambia la partida.
-- URL con `?reset&tut=3&nivel=N`. Con el tutorial de controles pendiente
+- URL con `?reset&tut=1&nivel=N` (`tut` se satura: `?tut=3` vale igual). Con el tutorial de controles pendiente
   (`?reset` solo) el tablero arranca con un montón precargado y la partida no
   corre hasta que la prueba gire.
 - Un grid montado a mano tiene que estar asentado (`gravityPass()` no mueve
