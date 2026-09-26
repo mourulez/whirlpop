@@ -63,6 +63,11 @@ orientativo: 80 líneas.
   0.645 y el HUD centrado debajo. La ergonomía Game Boy es de móvil (no hay
   móviles 4:3): no se rediseña el tablet por los pulgares. Se propuso abrir ahí
   el HUD a las esquinas para agrandar la esfera y se descartó.
+- El tutorial de controles del nivel 1 manda sobre el calendario: la partida no
+  arranca (ni corre `t` ni cae nada) hasta el primer giro, y mientras dura `t` se
+  retiene en el `at` del nivel 2, que no abre hasta consumirlo. Los niveles no se
+  solapan con él.
+- No hay colores nuevos: el nivel 7 es el último. El rosa (nivel 8) se quitó.
 
 ## Verificación
 
@@ -94,10 +99,15 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   captura con un viewport mayor que el que vio el script: `draw()`, cambiar el
   canvas por un `<img>` con `cv.toDataURL()`, fijar el `body` a
   `innerWidth`×`innerHeight` con un `transform` (los `fixed` se anclan a él) y
-  cortar el `resize` tardío en fase de captura.
+  cortar el `resize` tardío en fase de captura. Las transiciones y animaciones
+  CSS no avanzan con el tiempo virtual: pausarlas en el punto que se quiera ver
+  (`animation-delay` negativo) y quitar las transiciones, o el tip sale a medio
+  fundido.
 - Perfil nuevo por ejecución (`--user-data-dir`): el guardado de `localStorage`
   cambia la partida.
-- URL con `?reset&tut=3&nivel=N`.
+- URL con `?reset&tut=3&nivel=N`. Con el tutorial de controles pendiente
+  (`?reset` solo) el tablero arranca con un montón precargado y la partida no
+  corre hasta que la prueba gire.
 - Un grid montado a mano tiene que estar asentado (`gravityPass()` no mueve
   nada): si no, el primer destello lo recoloca y la prueba mide otra cosa.
 - Un cambio que no debe alterar el juego se demuestra con partidas sembradas
@@ -130,4 +140,7 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 
 - Windows, con Git Bash y PowerShell. No hay node; sí `python3`.
 - Chrome en `C:/Program Files/Google/Chrome/Application/chrome.exe`.
+- `art/` es la fuente editable de los glifos (Kenney Input Prompts, CC0), ya
+  pegados en `index.html`: no se carga en ejecución y se excluye de cualquier
+  zip de distribución, no del repo.
 - `to-do list.md` es del usuario y está excluido en `.git/info/exclude`: no tocarlo.

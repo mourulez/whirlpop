@@ -71,6 +71,49 @@
              color:#cfd2e6; text-shadow:0 1px 6px rgba(4,4,12,.95);
              opacity:0; transition:opacity .6s ease; }
   .lvl-tip.on { opacity:1; transition:opacity .3s ease; }
+  /* Contenido del tip. El tutorial de controles cambia de fase con el tip ya a la
+     vista: el contenido nuevo no pasa por el fade de .on, entra con el suyo. */
+  .tip-in { display:block; animation:tipIn .25s ease; }
+  @keyframes tipIn { from { opacity:0; } }
+  /* Glifos del tutorial de controles (símbolos en #glyphs). Nada reserva altura
+     en el layout: la fila cuelga del tip, que ya se superpone. La sombra es la
+     del texto, pasada a filter para que se lean igual sobre el tablero. */
+  .glyphs { display:flex; justify-content:center; align-items:center; gap:calc(var(--u)*3);
+            margin-top:calc(var(--u)*1.6); overflow:visible;
+            filter:drop-shadow(0 1px 6px rgba(4,4,12,.95)); }
+  .gl { position:relative; }
+  .gl svg { display:block; height:max(44px, calc(var(--u)*12)); width:auto; overflow:visible; }
+  /* el vaivén reserva su recorrido: la fila no salta al moverse la mano */
+  .gl.sway { padding:0 calc(var(--u)*5); }
+  .sway svg { animation:sway 1.6s ease-in-out infinite; }
+  @keyframes sway { 0%,100% { transform:translateX(calc(var(--u)*-5)); }
+                    50%     { transform:translateX(calc(var(--u)*5)); } }
+  /* las flechas siguen al ratón: → mientras va a la derecha, ← mientras vuelve */
+  .k-r { animation:keyR 1.6s steps(1,end) infinite; }
+  .k-l { animation:keyL 1.6s steps(1,end) infinite; }
+  @keyframes keyR { 0% { opacity:1; } 50%,100% { opacity:0; } }
+  @keyframes keyL { 0% { opacity:0; } 50%,100% { opacity:1; } }
+  /* pulsación: el glifo se hunde sobre su punto de contacto (--o, lo pone
+     glyph()) y el anillo sale de ahí, por detrás. El anillo es lo que enseña
+     el hard drop y va en amarillo, grueso y sin apagarse hasta pasada la mitad
+     de su crecida: en el gris del glifo apenas se veía, y en el ratón nace
+     tapado por el botón relleno. */
+  .press .fig { transform-origin:var(--o); animation:press 1.2s ease-in-out infinite; }
+  @keyframes press { 0%,24%,100% { transform:none; }
+                     12% { transform:translateY(calc(var(--u)*.6)) scale(.95); } }
+  .press .ring { position:absolute; left:0; top:0; }
+  .ring circle { fill:none; stroke:#ffd23f; stroke-width:2.4;
+                 transform-box:fill-box; transform-origin:center;
+                 animation:ring 1.2s ease-out infinite; }
+  @keyframes ring { 0%,7.99% { transform:scale(.3); opacity:0; }
+                    8%       { transform:scale(.3); opacity:1; }
+                    36%      { opacity:.9; }
+                    60%,100% { transform:scale(1.8); opacity:0; } }
+  @media (prefers-reduced-motion: reduce){
+    .sway svg, .press .fig, .k-r, .k-l, .ring circle { animation:none; }
+    .k-l { opacity:0; }
+    .ring circle { transform:scale(1.05); opacity:.8; }
+  }
   .btn { min-width:max(132px, calc(var(--u)*34)); padding:0 max(16px, calc(var(--u)*4));
          height:max(46px, calc(var(--u)*11)); border:1.5px solid #4a4f7a;
          border-radius:8px; background:rgba(30,34,60,.55); color:#cfd2e6;
@@ -112,6 +155,16 @@
 </style>
 </head>
 <body>
+<!-- Glifos del tutorial de controles: Kenney Input Prompts (CC0), fuente en art/.
+     Un símbolo por fichero, recortado a su contorno —y, en mano y ratón, al
+     anillo de pulsación a escala 1.8— y en currentColor. -->
+<svg id="glyphs" width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="g-touch" viewBox="17 15 37.5 40.5"><path fill="currentColor" d="M36 34.75 L36.8 34.8 Q38.3 33 40.3 33 42.65 32.95 43.65 34.65 44.75 33.75 46.25 33.75 47.75 33.75 48.65 34.95 50.7 37.75 52.4 41.8 54 47.75 51.1 51.55 49.45 53.45 46.95 54.35 L41.7 54.75 Q39.65 54.2 37.8 53.1 34.1 50.85 30.45 50.65 24.95 51 25 47.65 25 46.5 25.7 45.65 26.45 44.95 27.55 44.7 29.05 44.5 30.75 44.7 32.85 44.6 32.4 43 L27.85 30.65 Q27.35 29.35 27.85 28.3 28.25 27.55 29.95 27.15 31.6 26.75 32.5 27.45 L33.7 29.05 36 34.75"/></symbol>
+  <symbol id="g-mouse" viewBox="4.5 2.5 46 52"><path fill="currentColor" d="M21.5 10 L42.5 10 Q50 10.25 50 18 L50 38 Q50 44.6 45.3 49.3 40.6 54 34 54 L30 54 Q23.4 54 18.7 49.3 14 44.6 14 38 L14 18 Q14 10.25 21.5 10 M47 38 L47 31 37.95 31 Q37.65 32.85 36.25 34.25 34.5 36 32 36 29.5 36 27.75 34.25 26.35 32.85 26.1 31 L17 31 17 38 Q17 43.35 20.85 47.2 24.65 51 30 51 L34 51 Q39.35 51 43.2 47.2 47 43.35 47 38 M29.9 19.9 Q29 20.75 29 22 L29 30 Q29 31.25 29.9 32.15 30.75 33 32 33 33.25 33 34.15 32.15 35 31.25 35 30 L35 22 Q35 20.75 34.15 19.9 33.25 19 32 19 30.75 19 29.9 19.9 M42 13 L34 13 34 16.35 Q35.25 16.75 36.25 17.75 38 19.5 38 22 L38 28 47 28 47 18 Q47 13 42 13"/></symbol>
+  <symbol id="g-left" viewBox="8.5 16.5 47 31"><path fill="currentColor" d="M29 20 Q28 20 28 21 L28 27 Q28 28 29 28 L35 28 Q36 28 36 27 L36 21 Q36 20 35 20 L29 20 M29 17 L35 17 Q39 17 39 21 L39 27 Q39 31 35 31 L29 31 Q25 31 25 27 L25 21 Q25 17 29 17 M45 33 L51 33 Q55 33 55 37 L55 43 Q55 47 51 47 L45 47 Q41 47 41 43 L41 37 Q41 33 45 33 M52 37 Q52 36 51 36 L45 36 Q44 36 44 37 L44 43 Q44 44 45 44 L51 44 Q52 44 52 43 L52 37 M29 33 L35 33 Q39 33 39 37 L39 43 Q39 47 35 47 L29 47 Q25 47 25 43 L25 37 Q25 33 29 33 M28 37 L28 43 Q28 44 29 44 L35 44 Q36 44 36 43 L36 37 Q36 36 35 36 L29 36 Q28 36 28 37 M13 33 L19 33 Q23 33 23 37 L23 43 Q23 47 19 47 L13 47 Q9 47 9 43 L9 37 Q9 33 13 33"/></symbol>
+  <symbol id="g-right" viewBox="8.5 16.5 47 31"><path fill="currentColor" d="M29 20 Q28 20 28 21 L28 27 Q28 28 29 28 L35 28 Q36 28 36 27 L36 21 Q36 20 35 20 L29 20 M29 17 L35 17 Q39 17 39 21 L39 27 Q39 31 35 31 L29 31 Q25 31 25 27 L25 21 Q25 17 29 17 M45 33 L51 33 Q55 33 55 37 L55 43 Q55 47 51 47 L45 47 Q41 47 41 43 L41 37 Q41 33 45 33 M29 33 L35 33 Q39 33 39 37 L39 43 Q39 47 35 47 L29 47 Q25 47 25 43 L25 37 Q25 33 29 33 M28 37 L28 43 Q28 44 29 44 L35 44 Q36 44 36 43 L36 37 Q36 36 35 36 L29 36 Q28 36 28 37 M13 33 L19 33 Q23 33 23 37 L23 43 Q23 47 19 47 L13 47 Q9 47 9 43 L9 37 Q9 33 13 33 M12 37 L12 43 Q12 44 13 44 L19 44 Q20 44 20 43 L20 37 Q20 36 19 36 L13 36 Q12 36 12 37"/></symbol>
+  <symbol id="g-down" viewBox="8.5 16.5 47 31"><path fill="currentColor" d="M29 20 Q28 20 28 21 L28 27 Q28 28 29 28 L35 28 Q36 28 36 27 L36 21 Q36 20 35 20 L29 20 M29 17 L35 17 Q39 17 39 21 L39 27 Q39 31 35 31 L29 31 Q25 31 25 27 L25 21 Q25 17 29 17 M45 33 L51 33 Q55 33 55 37 L55 43 Q55 47 51 47 L45 47 Q41 47 41 43 L41 37 Q41 33 45 33 M52 37 Q52 36 51 36 L45 36 Q44 36 44 37 L44 43 Q44 44 45 44 L51 44 Q52 44 52 43 L52 37 M29 33 L35 33 Q39 33 39 37 L39 43 Q39 47 35 47 L29 47 Q25 47 25 43 L25 37 Q25 33 29 33 M13 33 L19 33 Q23 33 23 37 L23 43 Q23 47 19 47 L13 47 Q9 47 9 43 L9 37 Q9 33 13 33 M12 37 L12 43 Q12 44 13 44 L19 44 Q20 44 20 43 L20 37 Q20 36 19 36 L13 36 Q12 36 12 37"/></symbol>
+</svg>
 <canvas id="c"></canvas>
 <div id="hud">
   <div class="hblock"><span class="hlabel">SCORE</span><span class="hval" id="score">0</span></div>
@@ -183,10 +236,10 @@ function bombHits(c,r){ return (q,s) => (q-c)*(q-c) + (s-r)*(s-r) <= BOMB_R2; }
 // ratio, no el suelo, y por eso la rampa es más corta que la de color —200 contra
 // 380—: la de color todavía está bajando, así que con rampas iguales el ratio se
 // pasaba la partida entera de camino y solo llegaba a 1/3 hacia los 15 min.
-// Con 200 llega cuando abre el último nivel (t=265: 1/3,2) y sin rebasarlo: el
-// máximo de blancas se da en t=455 y es 1/2,97, un 1% de nada. Más corta sí lo
-// rebasa —con 98 el ratio baja a 1/2,56 a mitad de partida y luego vuelve a
-// subir—, y eso es un pico de blancas que nadie ha pedido.
+// Con 200 llega hacia t=265, 45 s después de abrir el último nivel (1/3,2), y
+// sin rebasarlo: el máximo de blancas se da en t=455 y es 1/2,97, un 1% de nada.
+// Más corta sí lo rebasa —con 98 el ratio baja a 1/2,56 a mitad de partida y
+// luego vuelve a subir—, y eso es un pico de blancas que nadie ha pedido.
 const WHITE_INT_START = 8, WHITE_INT_MIN = 3.0, WHITE_INT_RAMP = 200;
 const WHITE_SPREAD = 50 * Math.PI/180;   // dispersión alrededor del punto opuesto
 const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
@@ -273,12 +326,17 @@ function gaugeOn(){ return level >= 4 || gaugeEarly; }
 // almacén guarda los contadores de tutorial por `id`, así que reordenar niveles
 // moviendo un `at` no reasigna progresos a la mecánica equivocada.
 const LEVELS = [
-  { n:1, id:"ctrl",   at:0,   tip:null },   // dinámico: depende del dispositivo, ver tipFor()
-  // INVARIANTE: at < STONE_TIME. La edad de una bola nunca supera `t`, así que
-  // mientras se cumpla es imposible que aparezca una piedra antes de explicarla
-  // y ageBubbles() no necesita preguntar por el nivel. Al subir este `at` por
-  // encima de 34 hay que devolverle allí la guarda.
-  { n:2, id:"stone",  at:19,  tip:"Si tardas, la bola se vuelve piedra y ya no estalla. El anillo gris avisa." },
+  { n:1, id:"ctrl",   at:0,   tip:null },   // guion propio en tres fases: ver CTRL_TEXT
+  // INVARIANTE: at < STONE_TIME. Antes del nivel 2 la edad de una bola no pasa de
+  // `t` —la guarda está en ageBubbles(), porque el tutorial de controles retiene
+  // `t` y la edad sigue corriendo—, así que mientras se cumpla es imposible que
+  // aparezca una piedra antes de explicarla.
+  // Puesta en escena, como la blanca en camino del nivel 3: al abrir, lo más viejo
+  // del montón tiene 19 s y la primera piedra llegaría 15 s después, con el tip ya
+  // olvidado. stoneDemo() adelanta unas pocas para que se petrifiquen mientras se
+  // lee. Solo con tip: quien ya se lo sabe juega la partida de siempre.
+  { n:2, id:"stone",  at:19,  intro(){ stoneDemo(); },
+                      tip:"Si tardas mucho, las bolas se vuelven piedra y ya no estallan." },
   // el tutorial de las blancas llega con una blanca ya en camino: se lee el texto
   // mirando la cosa de la que habla, no esperando 8 s a que aparezca sola.
   { n:3, id:"white",  at:50,  on(){ spawnWhite(); whiteT = whiteInterval(); },
@@ -289,7 +347,7 @@ const LEVELS = [
   // el frame cero (ver gaugeOn()): ese salto sería un bonus regalado a mitad de
   // partida y sin texto que lo justifique.
   { n:4, id:"gauge",  at:90,  intro(){ gauge = GAUGE_INTRO; },
-                      tip:"Cierra el anillo: saldrá una bomba que revienta todo lo que tenga alrededor." },
+                      tip:"Cierra el anillo con matches y combos: saldrá una bomba que revienta todo lo que tenga alrededor." },
   // El púrpura no puede esperar al azar: con 5 colores en la bolsa podría tardar
   // varias fichas en salir y el tip se leería sin nada que mirar. `forceK` reserva
   // el color de la próxima ficha, y si el aviso de la pendiente todavía no ha
@@ -306,13 +364,12 @@ const LEVELS = [
   // los dos vaivenes (ver pickNext()), y reserva la primera horizontal.
   { n:7, id:"sineH",  at:220, on(){ forceSine = "h"; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
                       tip:"Y también de arriba abajo." },
-  { n:8, id:"pink",   at:265, tip:"Nueva bola: rosa." },
 ];
 // Intervalo entre blancas: se acorta con la partida, pero la rampa cuenta desde
 // que abrió el nivel 3, no desde t=0. En el propio instante de abrir vale
 // WHITE_INT_START, así que la blanca del tutorial deja el ciclo recién arrancado.
-// De 8 s a 3,9 s mientras abren los niveles 4 a 8: las blancas doblan su ritmo
-// justo en el tramo en el que el jugador ya las conoce y llega todo lo demás.
+// De 8 s a 4,3 s mientras abren los niveles 4 a 7: las blancas casi doblan su
+// ritmo justo en el tramo en el que el jugador ya las conoce y llega todo lo demás.
 function whiteInterval(){
   return WHITE_INT_MIN + (WHITE_INT_START-WHITE_INT_MIN)*
          Math.exp(-(t-LEVELS[2].at)/WHITE_INT_RAMP*1.6);
@@ -331,43 +388,109 @@ function sineChance(){
 
 // el tip se lee, no se parpadea: la ventana sale del número de palabras.
 const READ_MIN = 3.5, READ_MAX = 9.0, READ_PER_WORD = 0.38, READ_BASE = 1.4;
+// Solo texto: los glifos del tutorial de controles no cuentan como palabras.
 function readTime(tip){
-  const words = tip.replace(/<br>/g," ").trim().split(/\s+/).length;
+  const words = tip.trim().split(/\s+/).length;
   return Math.max(READ_MIN, Math.min(READ_MAX, READ_BASE + READ_PER_WORD*words));
 }
 
-// El tip del nivel 1 es el único de dos líneas —objetivo y control— y el único
-// que se compone al vuelo: los primeros segundos son justo cuando el jugador
-// revela qué dispositivo usa, así que el modo arranca por matchMedia y lo fija
-// el primer gesto real. Si cambia con el tip a la vista se reescribe en vivo,
-// sin reiniciar ni el temporizador ni el fade.
+// ─── tutorial de controles ─────────────────────────────────────────────────
+// El tip del nivel 1 es un guion de tres fases en orden estricto, y es el único
+// que se compone al vuelo:
+//  A. girar: no avanza hasta que el jugador gira el montón de verdad, y hasta
+//     entonces la partida no arranca: ni corre `t` ni cae ninguna ficha. Se lee y
+//     se prueba el giro sin nada encima; la cuenta de la primera ficha empieza
+//     en el tick siguiente al giro.
+//  B. juntar: sin reloj, hasta el primer match que se resuelva ya en B.
+//  C. soltar rápido: con su ventana de lectura normal. Agotarla es el único punto
+//     de consumo; completar A o B no consume.
+// Mientras dura, `t` no pasa del `at` del nivel 2 (ver updateGame()): el tutorial
+// no endurece la partida ni deja que el nivel 2 lo interrumpa.
+// Los listeners solo marcan `ctrlTurn`; la fase la cambia el tick siguiente.
+// El modo arranca por matchMedia y lo fija el primer gesto real: los primeros
+// segundos son justo cuando el jugador revela qué dispositivo usa. Si cambia con
+// el tip a la vista se reescribe en vivo, sin cambiar de fase ni reiniciar la
+// ventana de C.
 let inputMode = matchMedia("(pointer: fine)").matches ? "desktop" : "touch";
 let inputModeFixed = false;
-function tipFor(lv){
-  if (lv === 1)
-    return "Junta 3 o más del mismo color.<br>" + (inputMode === "desktop"
-      ? "Arrastra o ← → para girar. Clic o ↓ para soltar rápido."
-      : "Arrastra para girar. Toca para soltar rápido.");
-  return LEVELS[lv-1].tip;
+let ctrlPhase = null, ctrlTurn = false;
+const CTRL_TEXT = {
+  A: { touch:"Arrastra para girar el montón.",
+       desktop:"Mantén el botón izquierdo y arrastra el ratón, o usa las flechas para girar." },
+  B: { touch:"Junta 3 bolas del mismo color para hacer match y eliminarlas.",
+       desktop:"Junta 3 bolas del mismo color para hacer match y eliminarlas." },
+  C: { touch:"Toca para que las bolas caigan de golpe.",
+       desktop:"Haz clic o pulsa abajo para que las bolas caigan de golpe." },
+};
+// Caja de cada símbolo de #glyphs en el lienzo original 64×64, el punto de
+// contacto —yema, botón izquierdo, tecla ↓— del que sale la pulsación y el radio
+// base del anillo. Mano y ratón reservan en su caja el anillo a escala 1.8. El
+// del ratón es mayor porque nace detrás del botón relleno: con el de la yema
+// solo asomaba ya casi transparente.
+const GLYPH = {
+  touch: { id:"g-touch", vb:[17,   15,   37.5, 40.5], at:[30, 28], ring:6 },
+  mouse: { id:"g-mouse", vb:[ 4.5,  2.5, 46,   52  ], at:[23, 21], ring:9 },
+  keys:  {               vb:[ 8.5, 16.5, 47,   31  ], at:[32, 40] },
+};
+// El <svg> exterior mide lo mismo que la caja del símbolo pero con origen en 0:
+// el <use> ocupa el 100% y el anillo se sitúa restando la esquina.
+function glyph(g, cls, uses, ring){
+  const [x,y,w,h] = g.vb, px = g.at[0]-x, py = g.at[1]-y;
+  const box = `viewBox="0 0 ${w} ${h}"`;
+  const body = uses.map(([id,c]) => `<use href="#${id}"${c ? ` class="${c}"` : ""}/>`).join("");
+  return `<span class="gl ${cls}">` +
+    (ring ? `<svg class="ring" ${box}><circle cx="${px}" cy="${py}" r="${g.ring}"/></svg>` : "") +
+    `<svg class="fig" ${box} style="--o:${(px/w*100).toFixed(1)}% ${(py/h*100).toFixed(1)}%">${body}</svg></span>`;
 }
+function ctrlGlyphs(){
+  const desk = inputMode === "desktop", dev = desk ? GLYPH.mouse : GLYPH.touch;
+  if (ctrlPhase === "A")
+    return glyph(dev, "sway", [[dev.id]]) +
+           (desk ? glyph(GLYPH.keys, "", [["g-right","k-r"], ["g-left","k-l"]]) : "");
+  if (ctrlPhase === "C")
+    return glyph(dev, "press", [[dev.id]], true) +
+           (desk ? glyph(GLYPH.keys, "press", [["g-down"]]) : "");
+  return "";
+}
+function renderCtrl(){
+  const g = ctrlGlyphs();
+  tipEl.innerHTML = `<div class="tip-in">${CTRL_TEXT[ctrlPhase][inputMode]}` +
+    (g ? `<div class="glyphs" aria-hidden="true">${g}</div>` : "") + `</div>`;
+}
+// El cambio de fase no pasa por el fade de .on: el tip sigue a la vista y el
+// contenido nuevo entra con el suyo (.tip-in).
+function setCtrlPhase(p){
+  ctrlPhase = p;
+  renderCtrl();
+  if (p === "C") tipT = readTime(CTRL_TEXT.C[inputMode]);
+}
+// Sin tutorial de controles la partida es la de siempre: ni guion, ni montón
+// precargado, ni `t` retenido.
+function ctrlPending(){ return startLevel === 1 && !tutSeen("ctrl"); }
 function setInputMode(m){
   if (inputModeFixed) return;
   inputModeFixed = true;
   if (m === inputMode) return;
   inputMode = m;
-  if (level === 1 && tipT > 0) tipEl.innerHTML = tipFor(1);
+  if (ctrlPhase) renderCtrl();
 }
 const lvlNEl = document.querySelector(".lvl-n");
 const tipEl  = document.querySelector(".lvl-tip");
 // Único punto donde se decide si hay tip: tras tres lecturas completas el nivel
-// abre con el número a secas. Con tipT a 0 el bloque de fade de frame() no tiene
-// nada que hacer y setInputMode() tampoco reescribe nada —cae solo.
+// abre con el número a secas. Con tipT a 0 y sin fase el bloque de fade de
+// updateGame() no tiene nada que hacer y setInputMode() tampoco reescribe nada.
 function showLevel(){
   lvlNEl.textContent = "NIVEL " + level;
-  if (tutSeen(LEVELS[level-1].id)){ tipT = 0; tipEl.classList.remove("on"); return; }
-  const tip = tipFor(level);
-  tipT = readTime(tip);
-  tipEl.innerHTML = tip;
+  tipT = 0; ctrlPhase = null;
+  if (level === 1 ? !ctrlPending() : tutSeen(LEVELS[level-1].id)){
+    tipEl.classList.remove("on"); return;
+  }
+  if (level === 1) setCtrlPhase("A");
+  else {
+    const tip = LEVELS[level-1].tip;
+    tipT = readTime(tip);
+    tipEl.innerHTML = `<div class="tip-in">${tip}</div>`;
+  }
   tipEl.classList.add("on");
 }
 
@@ -547,12 +670,47 @@ const DEPTH = new Int8Array(N*N);
   }
 })();
 
+// Montón con el que arranca la partida mientras el tutorial de controles está
+// pendiente: girar un tablero vacío no enseña nada, y la fase B necesita material
+// para un primer match. `.` vacía, `0`–`3` color, `*` la piedra central.
+// Es un literal y no se genera en ejecución: no gasta Math.random, así que la
+// partida sembrada lleva la misma secuencia que sin él. Salió al azar de un
+// script aparte, filtrado hasta cumplir: 22 bolas a ≤ 3 celdas del centro, lejos
+// del borde; asentado (gravityPass() no mueve nada); sin grupos de CHAIN_MIN; los
+// cuatro colores base y sin morado; sin simetría de giro, ni de forma ni de color,
+// para que el giro se vea; y siete parejas con hueco al lado donde una bola se
+// quedaría, para que el primer match esté a la vista.
+const CTRL_PILE = [
+  "...............",
+  "...............",
+  "...............",
+  "...............",
+  ".......2.......",
+  ".....3023......",
+  "......3300.....",
+  "....301*221....",
+  ".....021.......",
+  ".....331.......",
+  ".......2.......",
+  "...............",
+  "...............",
+  "...............",
+  "...............",
+];
+
 function reset(){
   grid = new Array(N*N).fill(null);
   floaters = []; cascadeF = null;
   flashT = 0; flashSet = new Set(); flashBonus = false;
   pendingBonus = null;
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
+  // ya asentadas, con la forma de place(): ni caen ni puntúan al aparecer
+  if (ctrlPending())
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+      const k = "0123".indexOf(CTRL_PILE[r][c]);
+      if (k >= 0) grid[idx(c,r)] = { k, age:0, vc:c, vr:r, fresh:false };
+    }
+  ctrlTurn = false;
   angle = angleT = anglePrev = angleD0 = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
   simTick = 0;
   spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; deadBall = outBall = null; lastColorAngle = null;
@@ -1402,6 +1560,8 @@ function commitFlash(){
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
     if (flashSet.has(OUT)) outBall = null;
     if (chained){ cascadeF.links++; cascadeF.bump = 1; }
+    // el primer match resuelto en la fase B del tutorial de controles la cierra
+    if (ctrlPhase === "B") setCtrlPhase("C");
   }
 
   const wasBonus = flashBonus;
@@ -1554,15 +1714,40 @@ function easeVisual(dt){
 // que el jugador no ha sabido limpiar ya están envejecidas, los avisos aparecen
 // de golpe sobre ellas y la primera piedra cae poco después. Se explica una
 // amenaza en curso, no una que empieza a contar en ese instante.
-// Aquí no hay guarda de nivel y no le hace falta: la invariante anotada en LEVELS
-// garantiza que ninguna edad alcance STONE_TIME antes de que abra el nivel 2. El
-// anillo de aviso sí se esconde, porque ese llega mucho antes que la piedra.
+// Guarda: antes del nivel 2 la edad no pasa de `t`. Sin tutorial de controles no
+// hace nada —una bola nace con `t` ya corriendo y suma los mismos `dt`—, pero el
+// tutorial retiene `t` en 19 y el jugador puede quedarse en él más de 34 s. Con la
+// invariante anotada en LEVELS ninguna edad alcanza STONE_TIME antes de que abra
+// el nivel 2, y al abrir el tablero llega envejecido hasta 19 s como mucho: los
+// avisos aparecen de golpe y la primera piedra cae poco después. El anillo de
+// aviso sí se esconde en el nivel 1, porque ese llega mucho antes que la piedra.
+// Tutorial del nivel 2: las bolas de color más viejas de la superficie —con un
+// hueco jugable al lado, donde se ven y donde el jugador aún podría salvarlas— se
+// ponen a STONE_DEMO s de petrificarse, una tras otra dentro de la ventana de
+// lectura (6,3 s). Su aviso gris sale ya grueso y rápido, y las piedras caen de
+// una en una con el texto a la vista. Ninguna se rejuvenece, y lo que está
+// destellando no cuenta: va a estallar. Sin azar: se desempata por índice.
+const STONE_DEMO = [2, 3.5, 5];
+function stoneDemo(){
+  const cand = [];
+  for (let i=0;i<N*N;i++){
+    const g = grid[i];
+    if (!g || g.k<0 || g.k===WHITE || g.k===STONE || flashSet.has(i)) continue;
+    const c = i%N, r = (i/N)|0;
+    if (NB.some(([dc,dr]) => playable(c+dc,r+dr) && !grid[idx(c+dc,r+dr)])) cand.push(g);
+  }
+  cand.sort((a,b) => b.age - a.age);          // estable: a igual edad, por índice
+  STONE_DEMO.forEach((s,j) => {
+    if (cand[j]) cand[j].age = Math.max(cand[j].age, STONE_TIME - s);
+  });
+}
 function ageBubbles(dt){
   for (let i=0;i<N*N;i++){
     const g = grid[i];
     // la piedra central, las piedras y las blancas no envejecen
     if (!g || g.k<0 || g.k===STONE || g.k===WHITE) continue;
     g.age += dt;
+    if (level < 2 && g.age > t) g.age = t;
     if (g.age > STONE_TIME) g.k = STONE;
   }
 }
@@ -1670,6 +1855,7 @@ cv.addEventListener("pointermove", e=>{
     while (Math.abs(dragAcc) >= px){ rotate(d); dragAcc -= d*px; }
     dir = d;
     ptrMoved = true;
+    ctrlTurn = true;                     // giro efectivo: avanza la fase A del tutorial
     rotT = holdRate();
   }
 }, {passive:true});
@@ -1707,6 +1893,7 @@ addEventListener("keydown", e=>{
   if (KEY_DIRS[e.code] !== undefined){
     e.preventDefault();
     setInputMode("desktop");
+    ctrlTurn = true;
     if (e.repeat) return;                  // la repetición la conduce el juego, no el SO
     if (heldKeys.indexOf(e.code) < 0) heldKeys.push(e.code);
     recalcKeyDir();
@@ -1889,7 +2076,8 @@ function draw(alpha){
   drawGauge();
 
   // aviso de la próxima ficha: arco de 35° fuera del círculo, en su color
-  if (!dead && nextSpawn && spawnT < TELEGRAPH){
+  // en la fase A del tutorial no hay cuenta: nada que anunciar todavía
+  if (!dead && nextSpawn && spawnT < TELEGRAPH && ctrlPhase !== "A"){
     const p = 1 - Math.max(0,spawnT)/TELEGRAPH;        // 0 → 1 al acercarse
     const col = nextSpawn.k===WHITE ? PAINT[WHITE] : COL[nextSpawn.k];
     const a0 = nextSpawn.aArc - TELEGRAPH_ARC/2, a1 = nextSpawn.aArc + TELEGRAPH_ARC/2;
@@ -2044,13 +2232,25 @@ let simTick = 0;                           // ticks de la partida: solo para las
 // flotantes, asentamiento del grid— también va aquí: es determinista igual.
 function updateGame(dt){
   simTick++;
+  // el giro que marcaron los listeners desde el tick anterior
+  const turned = ctrlTurn; ctrlTurn = false;
   if (!dead){
-    t += dt;
+    if (turned && ctrlPhase === "A") setCtrlPhase("B");
+    // en la fase A la partida todavía no ha empezado (ver CTRL_TEXT): el reloj y
+    // la cuenta de fichas esperan al primer giro; el giro sí corre
+    const idle = ctrlPhase === "A";
+    if (!idle) t += dt;
+    // Progresión retenida: mientras dura el tutorial de controles `t` se satura
+    // en el `at` del nivel 2 y el nivel 2 no abre. Abre en el tick siguiente al
+    // consumo, y desde ahí todo corre con los intervalos de siempre, desplazado.
+    // La dificultad queda congelada en la de ese instante: el tutorial no
+    // endurece la partida.
+    if (ctrlPhase && t > LEVELS[1].at) t = LEVELS[1].at;
     // progresión: `t` manda y `level` se deriva. El último nivel es terminal.
     // `while` y no `if`: arrancar en un nivel adelantado (?nivel=N) encadena
     // aquí todos los intermedios en orden, ejecutando cada on() —blancas activas,
     // morado en la bolsa— y dejando a la vista el tip del nivel destino.
-    while (level < LEVELS.length && t >= LEVELS[level].at){
+    while (!ctrlPhase && level < LEVELS.length && t >= LEVELS[level].at){
       const entering = LEVELS[level];    // 0-indexado: la entrada del nivel que abre
       level++;
       showLevel();                       // fija tipT, o lo deja a 0 si el tip ya está visto
@@ -2065,8 +2265,10 @@ function updateGame(dt){
         tipEl.classList.remove("on");
         // Único punto de consumo del tutorial: la ventana se ha agotado entera y
         // dentro de la partida. Morir con el tip a la vista no cuenta —con `dead`
-        // esto no corre— y no hay forma de sumar dos veces el mismo nivel.
+        // esto no corre— y no hay forma de sumar dos veces el mismo nivel. En el
+        // nivel 1 solo la fase C tiene ventana, y agotarla cierra el guion.
         tutConsume(LEVELS[level-1].id);
+        ctrlPhase = null;
       }
     }
     // teclado: DAS, rampa continua y decaimiento de la rampa al soltar
@@ -2095,7 +2297,7 @@ function updateGame(dt){
     anglePrev = angle;
     angle += (angleT-angle)*Math.min(1,ROT_TWEEN*dt);
 
-    spawnT -= dt;
+    if (!idle) spawnT -= dt;
     if (spawnT<=0){
       if (nextSpawn.sine) spawnSine(nextSpawn); else spawnNormal(nextSpawn);
       nextSpawn = pickNext();
