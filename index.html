@@ -1,18 +1,20 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Whirlpop</title>
-<meta name="description" content="Whirlpop — juego arcade de piezas que caen sobre un tablero que gira.">
+<meta name="description" content="Whirlpop — arcade game of pieces falling onto a spinning board.">
 <meta name="theme-color" content="#06060c">
 <!-- nombre con el que se guarda en la pantalla de inicio en iOS -->
 <meta name="apple-mobile-web-app-title" content="Whirlpop">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<!-- previsualización al compartir la URL -->
+<!-- previsualización al compartir la URL. Las metas no pasan por la tabla de
+     textos: buscadores y vistas previas no ejecutan JS, así que van en inglés,
+     el idioma de respaldo. -->
 <meta property="og:title" content="Whirlpop">
-<meta property="og:description" content="Juego arcade de piezas que caen sobre un tablero que gira.">
+<meta property="og:description" content="Arcade game of pieces falling onto a spinning board.">
 <meta property="og:type" content="website">
 <style>
   /* La columna vertical de la que cuelga todo el layout. El JS la reescribe en
@@ -184,8 +186,8 @@
 </svg>
 <canvas id="c"></canvas>
 <div id="hud">
-  <div class="hblock"><span class="hlabel">PUNTOS</span><span class="hval" id="score">0</span></div>
-  <div class="hblock"><span class="hlabel">MI RÉCORD</span><span class="hval" id="bestv">0</span></div>
+  <div class="hblock"><span class="hlabel" data-t="score"></span><span class="hval" id="score">0</span></div>
+  <div class="hblock"><span class="hlabel" data-t="best"></span><span class="hval" id="bestv">0</span></div>
 </div>
 <div id="lvl">
   <div class="lvl-tip"></div>
@@ -193,15 +195,123 @@
 <div id="pz"></div>
 <div id="fs">⛶</div>
 <div id="safe-top"></div>
-<div id="over" class="ovl"><b>FIN DE PARTIDA</b><span id="fin">0</span>
-  <div class="btn ghost">CONTINUAR</div><div class="btn" id="again">REINICIAR</div>
-  <div class="tut-again">Jugar de nuevo al tutorial</div></div>
-<div id="pause" class="ovl"><b>PAUSA</b><span id="pfin">0</span>
-  <div class="btn" id="resume">CONTINUAR</div><div class="btn" id="restart">REINICIAR</div>
-  <div class="tut-again">Jugar de nuevo al tutorial</div></div>
+<div id="over" class="ovl"><b data-t="over"></b><span id="fin">0</span>
+  <div class="btn ghost" data-t="resume"></div><div class="btn" id="again" data-t="restart"></div>
+  <div class="tut-again" data-t="tutAgain"></div></div>
+<div id="pause" class="ovl"><b data-t="pause"></b><span id="pfin">0</span>
+  <div class="btn" id="resume" data-t="resume"></div><div class="btn" id="restart" data-t="restart"></div>
+  <div class="tut-again" data-t="tutAgain"></div></div>
 
 <script>
 "use strict";
+
+// ─── textos ────────────────────────────────────────────────────────────────
+// Tabla única de todo lo que se lee. El original es el castellano de España; el
+// resto son traducciones suyas, tuteando. Cada entrada lleva las lenguas juntas,
+// así que una traducción que falte se ve al leer la tabla, y en ejecución cae al
+// inglés. "match" y "combo" se quedan sin traducir: son la jerga del género.
+// Las etiquetas del HUD no pasan de 9 caracteres, lo que ocupa "MI RÉCORD": en
+// landscape manda lo más ancho entre etiqueta y número (ver wideStage()), y una
+// etiqueta más larga encoge la esfera. Por lo mismo, los botones caben en su
+// ancho mínimo: si uno lo estirase, saldría más ancho que el de al lado.
+// Los tips de nivel van por el `id` de LEVELS; los del tutorial de controles,
+// por fase y, si cambian con el dispositivo, también por modo de input.
+const LANGS = ["es", "en", "fr", "it", "de"];
+const STR = {
+  score:    { es:"PUNTOS",         en:"SCORE",        fr:"SCORE",          it:"PUNTI",        de:"PUNKTE" },
+  best:     { es:"MI RÉCORD",      en:"MY BEST",      fr:"RECORD",         it:"RECORD",       de:"REKORD" },
+  over:     { es:"FIN DE PARTIDA", en:"GAME OVER",    fr:"FIN DE PARTIE",  it:"FINE PARTITA", de:"SPIELENDE" },
+  pause:    { es:"PAUSA",          en:"PAUSE",        fr:"PAUSE",          it:"PAUSA",        de:"PAUSE" },
+  resume:   { es:"CONTINUAR",      en:"CONTINUE",     fr:"CONTINUER",      it:"CONTINUA",     de:"WEITER" },
+  restart:  { es:"REINICIAR",      en:"RESTART",      fr:"REJOUER",        it:"RIAVVIA",      de:"NEUSTART" },
+  points:   { es:"puntos",         en:"points",       fr:"points",         it:"punti",        de:"Punkte" },
+  tutAgain: { es:"Jugar de nuevo al tutorial", en:"Replay the tutorial", fr:"Rejouer le tutoriel",
+              it:"Rigioca il tutorial", de:"Tutorial wiederholen" },
+
+  ctrlA_touch: {
+    es:"Arrastra para girar el montón.",
+    en:"Drag to spin the pile.",
+    fr:"Fais glisser pour faire tourner le tas.",
+    it:"Trascina per ruotare il mucchio.",
+    de:"Zieh, um den Haufen zu drehen." },
+  ctrlA_desktop: {
+    es:"Mantén el botón izquierdo y arrastra el ratón, o usa las flechas para girar.",
+    en:"Hold the left button and drag the mouse, or use the arrow keys to spin.",
+    fr:"Maintiens le clic gauche et bouge la souris, ou tourne avec les flèches.",
+    it:"Tieni premuto il tasto sinistro e trascina il mouse, oppure usa le frecce per ruotare.",
+    de:"Halte die linke Maustaste gedrückt und zieh, oder dreh mit den Pfeiltasten." },
+  ctrlB: {
+    es:"Junta 3 bolas del mismo color para hacer match y eliminarlas.",
+    en:"Group 3 balls of the same color to make a match and clear them.",
+    fr:"Réunis 3 boules de la même couleur pour faire un match et les éliminer.",
+    it:"Unisci 3 palline dello stesso colore per fare match ed eliminarle.",
+    de:"Bring 3 Kugeln derselben Farbe zusammen, um ein Match zu machen und sie loszuwerden." },
+  ctrlC_touch: {
+    es:"Toca para que las bolas caigan de golpe.",
+    en:"Tap to drop the balls at once.",
+    fr:"Touche l'écran pour faire tomber les boules d'un coup.",
+    it:"Tocca per far cadere subito le palline.",
+    de:"Tippe, damit die Kugeln sofort fallen." },
+  ctrlC_desktop: {
+    es:"Haz clic o pulsa abajo para que las bolas caigan de golpe.",
+    en:"Click or press down to drop the balls at once.",
+    fr:"Clique ou appuie sur bas pour faire tomber les boules d'un coup.",
+    it:"Fai clic o premi giù per far cadere subito le palline.",
+    de:"Klick oder drück nach unten, damit die Kugeln sofort fallen." },
+
+  tip_stone: {
+    es:"Si tardas mucho, las bolas se vuelven piedra y ya no estallan.",
+    en:"Take too long and the balls turn to stone and won't pop anymore.",
+    fr:"Si tu traînes, les boules se changent en pierre et n'éclatent plus.",
+    it:"Se ci metti troppo, le palline diventano pietra e non scoppiano più.",
+    de:"Wenn du zu lange brauchst, werden die Kugeln zu Stein und platzen nicht mehr." },
+  tip_white: {
+    es:"Las bolas blancas estallan con cualquier match que las toque.",
+    en:"White balls pop with any match that touches them.",
+    fr:"Les boules blanches éclatent dès qu'un match les touche.",
+    it:"Le palline bianche scoppiano con qualsiasi match che le tocchi.",
+    de:"Weiße Kugeln platzen bei jedem Match, das sie berührt." },
+  tip_gauge: {
+    es:"Cierra el anillo con matches y combos: saldrá una bomba que revienta todo lo que tenga alrededor.",
+    en:"Close the ring with matches and combos: you'll get a bomb that blasts everything around it.",
+    fr:"Ferme l'anneau avec des matchs et des combos pour obtenir une bombe qui fait tout sauter autour d'elle.",
+    it:"Chiudi l'anello con match e combo: arriverà una bomba che fa esplodere tutto ciò che ha intorno.",
+    de:"Schließ den Ring mit Matches und Combos: Dann kommt eine Bombe, die alles um sich herum sprengt." },
+  tip_purple: {
+    es:"Nuevo color: púrpura.",
+    en:"New color: purple.",
+    fr:"Nouvelle couleur : violet.",
+    it:"Nuovo colore: viola.",
+    de:"Neue Farbe: Lila." },
+  tip_sine: {
+    es:"Hay bolas que no caen. Cruzan el tablero de lado a lado.",
+    en:"Some balls don't fall. They cross the board from side to side.",
+    fr:"Certaines boules ne tombent pas. Elles traversent le plateau d'un côté à l'autre.",
+    it:"Alcune palline non cadono. Attraversano il tabellone da un lato all'altro.",
+    de:"Manche Kugeln fallen nicht. Sie ziehen von einer Seite zur anderen übers Feld." },
+  tip_sineH: {
+    es:"Y también de arriba abajo.",
+    en:"And from top to bottom, too.",
+    fr:"Et aussi de haut en bas.",
+    it:"E anche dall'alto in basso.",
+    de:"Und auch von oben nach unten." },
+};
+// El primero de la lista de preferencias del navegador que tengamos, por
+// lengua y sin variante (es-MX juega en castellano de España). Se recorre la
+// lista entera: con [ca, es] sale castellano, no el respaldo. Se decide una vez,
+// al cargar, y no se guarda: sin selector, siempre manda el navegador.
+const LANG = (() => {
+  const prefs = navigator.languages && navigator.languages.length ? navigator.languages
+                                                                  : [navigator.language];
+  for (const l of prefs){
+    const k = String(l || "").split("-")[0].toLowerCase();
+    if (LANGS.includes(k)) return k;
+  }
+  return "en";
+})();
+function tr(key){ const e = STR[key]; return e[LANG] ?? e.en; }
+document.documentElement.lang = LANG;
+for (const el of document.querySelectorAll("[data-t]")) el.textContent = tr(el.dataset.t);
 
 // ─── config ────────────────────────────────────────────────────────────────
 const N = 15, C = (N-1)/2;
@@ -344,7 +454,7 @@ function gaugeOn(){ return level >= 4 || gaugeEarly; }
 // almacén guarda los contadores de tutorial por `id`, así que reordenar niveles
 // moviendo un `at` no reasigna progresos a la mecánica equivocada.
 const LEVELS = [
-  { n:1, id:"ctrl",   at:0,   tip:null },   // guion propio en tres fases: ver CTRL_TEXT
+  { n:1, id:"ctrl",   at:0 },   // guion propio en tres fases: ver ctrlText()
   // INVARIANTE: at < STONE_TIME. Antes del nivel 2 la edad de una bola no pasa de
   // `t` —la guarda está en ageBubbles(), porque el tutorial de controles retiene
   // `t` y la edad sigue corriendo—, así que mientras se cumpla es imposible que
@@ -353,35 +463,29 @@ const LEVELS = [
   // del montón tiene 19 s y la primera piedra llegaría 15 s después, con el tip ya
   // olvidado. stoneDemo() adelanta unas pocas para que se petrifiquen mientras se
   // lee. Solo con tip: quien ya se lo sabe juega la partida de siempre.
-  { n:2, id:"stone",  at:19,  intro(){ stoneDemo(); },
-                      tip:"Si tardas mucho, las bolas se vuelven piedra y ya no estallan." },
+  { n:2, id:"stone",  at:19,  intro(){ stoneDemo(); } },
   // el tutorial de las blancas llega con una blanca ya en camino: se lee el texto
   // mirando la cosa de la que habla, no esperando 8 s a que aparezca sola.
-  { n:3, id:"white",  at:50,  on(){ spawnWhite(); whiteT = whiteInterval(); },
-                      tip:"Las bolas blancas estallan con cualquier match que las toque." },
+  { n:3, id:"white",  at:50,  on(){ spawnWhite(); whiteT = whiteInterval(); } },
   // Puesta en escena, no mecánica: el anillo aparece de golpe y barriendo hasta
   // GAUGE_INTRO, y el tip habla de cerrarlo mientras se ve cerrarse casi entero.
   // Va en `intro` y no en `on` porque quien ya se sabe el anillo lo tiene desde
   // el frame cero (ver gaugeOn()): ese salto sería un bonus regalado a mitad de
   // partida y sin texto que lo justifique.
-  { n:4, id:"gauge",  at:90,  intro(){ gauge = GAUGE_INTRO; },
-                      tip:"Cierra el anillo con matches y combos: saldrá una bomba que revienta todo lo que tenga alrededor." },
+  { n:4, id:"gauge",  at:90,  intro(){ gauge = GAUGE_INTRO; } },
   // El púrpura no puede esperar al azar: con 5 colores en la bolsa podría tardar
   // varias fichas en salir y el tip se leería sin nada que mirar. `forceK` reserva
   // el color de la próxima ficha, y si el aviso de la pendiente todavía no ha
   // empezado a pintarse se la vuelve a tirar a ella —recolorear un arco a medio
   // aparecer sería un parpadeo— para que el púrpura salga ya.
-  { n:5, id:"purple", at:130, on(){ forceK = 4; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
-                      tip:"Nuevo color: púrpura." },
+  { n:5, id:"purple", at:130, on(){ forceK = 4; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); } },
   // Misma reserva que el morado, y por la misma razón: la primera sinusoide no
   // puede depender de un 0.12. `forceSine` se salta el filtro de `prevSine`
   // —el tutorial manda— y el re-pick solo entra si el aviso todavía no se pinta.
-  { n:6, id:"sine",   at:175, on(){ forceSine = "v"; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
-                      tip:"Hay bolas que no caen. Cruzan el tablero de lado a lado." },
+  { n:6, id:"sine",   at:175, on(){ forceSine = "v"; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); } },
   // Otro eje, no otra cantidad: el nivel 7 reparte las mismas sinusoides entre
   // los dos vaivenes (ver pickNext()), y reserva la primera horizontal.
-  { n:7, id:"sineH",  at:220, on(){ forceSine = "h"; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); },
-                      tip:"Y también de arriba abajo." },
+  { n:7, id:"sineH",  at:220, on(){ forceSine = "h"; if (spawnT >= TELEGRAPH) nextSpawn = pickNext(); } },
 ];
 // Intervalo entre blancas: se acorta con la partida, pero la rampa cuenta desde
 // que abrió el nivel 3, no desde t=0. En el propio instante de abrir vale
@@ -432,14 +536,12 @@ function readTime(tip){
 let inputMode = matchMedia("(pointer: fine)").matches ? "desktop" : "touch";
 let inputModeFixed = false;
 let ctrlPhase = null, ctrlTurn = false;
-const CTRL_TEXT = {
-  A: { touch:"Arrastra para girar el montón.",
-       desktop:"Mantén el botón izquierdo y arrastra el ratón, o usa las flechas para girar." },
-  B: { touch:"Junta 3 bolas del mismo color para hacer match y eliminarlas.",
-       desktop:"Junta 3 bolas del mismo color para hacer match y eliminarlas." },
-  C: { touch:"Toca para que las bolas caigan de golpe.",
-       desktop:"Haz clic o pulsa abajo para que las bolas caigan de golpe." },
-};
+// El texto de la fase sale de STR: con variante por modo si la tiene, y si no,
+// el mismo para los dos.
+function ctrlText(){
+  const k = "ctrl" + ctrlPhase;
+  return tr(STR[k+"_"+inputMode] ? k+"_"+inputMode : k);
+}
 // Caja de cada símbolo de #glyphs en el lienzo original 64×64, el punto de
 // contacto —yema, botón izquierdo, tecla ↓— del que sale la pulsación y el radio
 // base del anillo. Mano y ratón reservan en su caja el anillo a escala 1.8. El
@@ -472,7 +574,7 @@ function ctrlGlyphs(){
 }
 function renderCtrl(){
   const g = ctrlGlyphs();
-  tipEl.innerHTML = `<div class="tip-in">${CTRL_TEXT[ctrlPhase][inputMode]}` +
+  tipEl.innerHTML = `<div class="tip-in">${ctrlText()}` +
     (g ? `<div class="glyphs" aria-hidden="true">${g}</div>` : "") + `</div>`;
 }
 // El cambio de fase no pasa por el fade de .on: el tip sigue a la vista y el
@@ -480,7 +582,7 @@ function renderCtrl(){
 function setCtrlPhase(p){
   ctrlPhase = p;
   renderCtrl();
-  if (p === "C") tipT = readTime(CTRL_TEXT.C[inputMode]);
+  if (p === "C") tipT = readTime(ctrlText());
 }
 // Sin tutorial de controles la partida es la de siempre: ni guion, ni montón
 // precargado, ni `t` retenido.
@@ -503,7 +605,7 @@ function showLevel(){
   }
   if (level === 1) setCtrlPhase("A");
   else {
-    const tip = LEVELS[level-1].tip;
+    const tip = tr("tip_" + LEVELS[level-1].id);
     tipT = readTime(tip);
     tipEl.innerHTML = `<div class="tip-in">${tip}</div>`;
   }
@@ -1972,7 +2074,7 @@ function pause(){
   loseInput();               // Alt-Tab con algo pulsado no puede dejarlo girando
   if (dead || paused) return;
   paused = true;
-  document.getElementById("pfin").textContent = score+" puntos";
+  document.getElementById("pfin").textContent = score+" "+tr("points");
   syncTutAgain();
   syncPause();
 }
@@ -2274,7 +2376,7 @@ function updateGame(dt){
   const turned = ctrlTurn; ctrlTurn = false;
   if (!dead){
     if (turned && ctrlPhase === "A") setCtrlPhase("B");
-    // en la fase A la partida todavía no ha empezado (ver CTRL_TEXT): el reloj y
+    // en la fase A la partida todavía no ha empezado (ver ctrlText()): el reloj y
     // la cuenta de fichas esperan al primer giro; el giro sí corre
     const idle = ctrlPhase === "A";
     if (!idle) t += dt;
@@ -2395,7 +2497,7 @@ function frame(now){
   if (dead){
     if (!bestSaved){ bestSaved = true; flushIfDirty(); syncTutAgain(); }
     document.getElementById("over").style.display="flex";
-    document.getElementById("fin").textContent = score+" puntos";
+    document.getElementById("fin").textContent = score+" "+tr("points");
     pzEl.style.visibility = "hidden";
   }
   requestAnimationFrame(frame);

@@ -70,8 +70,11 @@ orientativo: 80 líneas.
 - No hay colores nuevos: el nivel 7 es el último. El rosa (nivel 8) se quitó.
 - Cada tip sale una sola vez. Para verlos otra vez, "Jugar de nuevo al
   tutorial" en pausa y en fin de partida (solo si hay algo visto).
-- Toda la interfaz en castellano (PUNTOS, MI RÉCORD, FIN DE PARTIDA). "Match"
-  y "combo" se aceptan en los tips.
+- Todo texto sale de la tabla única `STR`; el original es el castellano de
+  España y el HTML solo lleva claves (`data-t`). Idioma: el primero de
+  `navigator.languages` entre ES, EN, FR, IT y DE; si no, inglés. Sin selector
+  ni forma de forzarlo. Las metas (`description`, `og:`) van fijas en inglés:
+  quien las lee no ejecuta JS. "Match" y "combo" no se traducen.
 
 ## Verificación
 
@@ -108,6 +111,8 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   CSS no avanzan con el tiempo virtual: pausarlas en el punto que se quiera ver
   (`animation-delay` negativo) y quitar las transiciones, o el tip sale a medio
   fundido.
+- El idioma se fuerza con un `<script>` *antes* del principal que redefina
+  `Navigator.prototype.languages`: `LANG` se decide al cargar.
 - Perfil nuevo por ejecución (`--user-data-dir`): el guardado de `localStorage`
   cambia la partida.
 - URL con `?reset&tut=1&nivel=N` (`tut` se satura: `?tut=3` vale igual). Con el tutorial de controles pendiente
