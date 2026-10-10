@@ -20,12 +20,15 @@ Prototipo en fase de testing. Se busca feedback.
 
 ## Desarrollo
 
-Abre `index.html` en el navegador. No hay build ni dependencias: el juego entero
+Abre `index.html` en el navegador. No hay build ni dependencias: el código entero
 está en ese fichero.
 
 ## Estructura
 
-- `index.html` — el juego completo: lógica, estilos y assets en un solo fichero.
+- `index.html` — el juego completo: lógica, estilos y glifos en un solo fichero.
+- `fonts/` — la tipografía Baloo 2 (subset latino) y su licencia SIL OFL.
+- `img/` — el logotipo de los telones de pausa y fin de partida.
+- `art/` — fuente editable de los glifos del tutorial; no se carga al jugar.
 - `CLAUDE.md` — reglas transversales, verificación y flujo de trabajo para Claude.
 - `.nojekyll` — evita que GitHub Pages procese el sitio con Jekyll.
 - `.gitignore` — ficheros que no se versionan (temporales del sistema y de editores).

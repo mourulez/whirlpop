@@ -33,6 +33,12 @@ orientativo: 80 líneas.
   `updateGame()`, a ticks fijos de `SIM_DT` (1/60); `draw(alpha)` interpola entre
   el tick anterior y el actual y no modifica nada de la partida. Los listeners de
   input solo tocan estado que el tick siguiente lee al empezar.
+- `Math.random` es solo de la partida. Cada efecto visual (fondo, rayo, estela)
+  tiene su PRNG con semilla fija (`vrand`, `rrand`, `prand`) y su reloj propio
+  avanza en `updateGame()` sin escribir estado de juego: gastarlo desde el dibujo
+  cambiaría la partida.
+- Cero peticiones externas (requisito Poki): fuente e imágenes van en el repo
+  con ruta relativa, nada de CDN ni Google Fonts.
 
 ## Decisiones cerradas
 
@@ -110,7 +116,7 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   cortar el `resize` tardío en fase de captura. Las transiciones y animaciones
   CSS no avanzan con el tiempo virtual: pausarlas en el punto que se quiera ver
   (`animation-delay` negativo) y quitar las transiciones, o el tip sale a medio
-  fundido.
+  fundido. Esperar a `document.fonts.ready` y a `img.decode()` antes de capturar.
 - El idioma se fuerza con un `<script>` *antes* del principal que redefina
   `Navigator.prototype.languages`: `LANG` se decide al cargar.
 - Perfil nuevo por ejecución (`--user-data-dir`): el guardado de `localStorage`
@@ -121,7 +127,9 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 - Un grid montado a mano tiene que estar asentado (`gravityPass()` no mueve
   nada): si no, el primer destello lo recoloca y la prueba mide otra cosa.
 - Un cambio que no debe alterar el juego se demuestra con partidas sembradas
-  idénticas contra `HEAD`: mismo grid, puntuación y frame de muerte. Un bug se
+  idénticas contra `HEAD`: mismo grid, puntuación y frame de muerte. Del grid se
+  comparan los campos de juego: las celdas llevan también estado solo de dibujo
+  (`rew`). Un bug se
   demuestra primero reproduciéndolo en `HEAD`.
 
 ## Forma de trabajar
@@ -152,5 +160,7 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 - Chrome en `C:/Program Files/Google/Chrome/Application/chrome.exe`.
 - `art/` es la fuente editable de los glifos (Kenney Input Prompts, CC0), ya
   pegados en `index.html`: no se carga en ejecución y se excluye de cualquier
-  zip de distribución, no del repo.
+  zip de distribución, no del repo. `fonts/` (Baloo 2, OFL) e `img/` sí van en el
+  zip: el juego los carga.
+- `perf/` es el banco de rendimiento, solo local (en `.gitignore`).
 - `to-do list.md` es del usuario y está excluido en `.git/info/exclude`: no tocarlo.

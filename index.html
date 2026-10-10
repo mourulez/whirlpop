@@ -16,41 +16,114 @@
 <meta property="og:title" content="Whirlpop">
 <meta property="og:description" content="Arcade game of pieces falling onto a spinning board.">
 <meta property="og:type" content="website">
+<!-- la única fuente, servida con el juego: cero peticiones a otros orígenes -->
+<link rel="preload" href="fonts/baloo2-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  /* Baloo 2 (SIL OFL 1.1, fonts/OFL.txt), subset latino con el eje wght 400–800.
+     Familia con nombre propio para no casar con una Baloo instalada en el sistema. */
+  @font-face { font-family:"Whirlpop Baloo"; src:url("fonts/baloo2-latin.woff2") format("woff2");
+               font-weight:400 800; font-display:block; }
   /* La columna vertical de la que cuelga todo el layout. El JS la reescribe en
      cada resize; este valor es el fallback hasta que arranca. --u = 1% de la
      columna: toda medida de UI se expresa en múltiplos suyos, con suelo en px. */
   :root { --stage: min(100vw, 64.5vh);
-          --u: calc(var(--stage) / 100); }
+          --u: calc(var(--stage) / 100);
+          /* --u del HUD, con techo: el de la columna del móvil más ancho en vertical
+             (430 px). Los marcadores son para leerse de reojo, no crecen con la
+             pantalla: en tablet, a escala de la columna, tapaban el tablero y en
+             landscape se comían la franja que la esfera podía usar. */
+          --uh: min(var(--u), 4.3px);
+          --ink:#231a4c;      /* contorno de todo: abajo de lavanda [62,44,133] × .56 */
+          --pearl:#f4f6fc;    /* relleno de texto */
+          --label:#c4bdea;    /* etiquetas del HUD: perla apagado hacia lavanda */
+          /* PAUSA / FIN DE PARTIDA. Solo en el telón: dentro de la partida
+             competiría con la alarma y con el ámbar */
+          --title:#ff9f45;
+          --lime-l:#eeffbe; --lime:#a0e812; --lime-m:#6fb406; --lime-d:#346400;  /* JEWEL_BONUS */ }
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { width:100%; height:100%; overflow:hidden; background:#06060c;
               overscroll-behavior:none;   /* sin "página anterior" al girar con trackpad */
               user-select:none; -webkit-user-select:none;
-              font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+              font-family:"Whirlpop Baloo", system-ui, sans-serif; }
   #c { display:block; width:100%; height:100%; touch-action:none; }
   #c.nocur { cursor:none; }       /* ver "cursor" en el input */
-  /* HUD: pertenece a la columna, se reparte sobre --stage y escala con --u.
-     Los dos marcadores viven abajo, en fila y con la misma composición —etiqueta
-     encima, número debajo—, dejando toda la mitad superior libre. En landscape,
-     si caben, se abren a los lados (.wide, abajo).
+  /* Todo el texto de la interfaz sale de esta regla: perla con un solo filo de
+     tinta, sin capas ni text-shadow. Cada uso solo cambia font-size, --sw (el
+     grosor del filo) y, si toca, color. Baloo tiene la caja vertical alta (1,6
+     em): dentro de una pieza .wp el texto baja .06em (.08em los números grandes)
+     para quedar centrado a la vista. */
+  .ol { color:var(--pearl); -webkit-text-stroke:var(--sw,.16em) var(--ink); paint-order:stroke fill;
+        font-weight:800; letter-spacing:.02em; line-height:1; }
+  /* .wp: la única pieza de controles y placas —botones, chrome y HUD—. Píldora,
+     filo de tinta, labio inferior y brillo superior. El brillo se mide sobre la
+     altura --h, no sobre el ancho: la misma mancha de luz en un icono redondo y
+     en un botón ancho. Color: --lime (la acción principal del telón) o --glass
+     (todo lo demás). Forma: botón (por defecto), --icon (chrome) o --plate (HUD,
+     no pulsable). Solo las pulsables llevan .tap, que al apretar baja el labio. */
+  .wp { --h:max(50px, calc(var(--u)*14)); --lip:max(4px, calc(var(--u)*1.2)); --edge:2px;
+        position:relative; height:var(--h); border-radius:999px; display:inline-flex;
+        align-items:center; justify-content:center; user-select:none;
+        min-width:max(200px, calc(var(--u)*56)); padding:0 calc(var(--u)*6);
+        box-shadow:0 0 0 var(--edge) var(--ink), inset 0 calc(var(--lip)*-1) 0 var(--shade),
+                   0 var(--lip) 0 0 var(--ink); }
+  .wp::after { content:""; position:absolute; pointer-events:none; border-radius:999px;
+               top:calc(var(--h)*.11); height:calc(var(--h)*.24);
+               left:calc(var(--h)*.3); right:calc(var(--h)*.3);
+               background:linear-gradient(rgba(255,255,255,var(--gloss)), rgba(255,255,255,0)); }
+  .wp--lime  { --shade:var(--lime-d); --gloss:.65;
+               background:linear-gradient(var(--lime-l) -30%, var(--lime) 55%, var(--lime-m)); }
+  .wp--glass { --shade:rgba(20,14,50,.45); --gloss:.4;
+               background:linear-gradient(rgba(255,255,255,.22), rgba(255,255,255,.04)), rgba(35,26,76,.5);
+               box-shadow:0 0 0 var(--edge) var(--ink), inset 0 0 0 1.5px rgba(244,246,252,.3),
+                          inset 0 calc(var(--lip)*-1) 0 var(--shade), 0 var(--lip) 0 0 var(--ink); }
+  .wp.tap { cursor:pointer; }
+  /* hundido: .press la pone tapBtn() mientras el dedo está encima, no :active,
+     que en un div de iOS es poco fiable */
+  .wp.tap.press { transform:translateY(var(--lip));
+                  box-shadow:0 0 0 var(--edge) var(--ink), inset 0 calc(var(--lip)*-.35) 0 var(--shade),
+                             0 0 0 0 var(--ink); }
+  .wp .ol { position:relative; top:.06em; font-size:max(22px, calc(var(--u)*6.2)); --sw:.17em; }
+  .wp.ghost { visibility:hidden; }
+  .wp--icon { --h:max(40px, calc(var(--u)*11)); --lip:calc(var(--u)*.9);
+              width:var(--h); min-width:0; padding:0; }
+  .wp--icon svg { width:52%; height:52%; overflow:visible; }
+  .ico { fill:var(--pearl); stroke:var(--ink); stroke-width:2.6; paint-order:stroke fill;
+         stroke-linejoin:round; }
+  /* HUD: pertenece a la columna, se reparte sobre --stage y escala con --uh (--u
+     con techo, ver :root).
+     Los dos marcadores viven abajo, en fila: dos placas idénticas, de ancho fijo,
+     con la etiqueta encajada en el filo de arriba y el número dentro, dejando
+     toda la mitad superior libre. En landscape, si caben, se abren a los lados
+     (.wide, abajo). .hblock es el contenedor de layout; la placa va dentro.
      pointer-events:none es crítico: el HUD cae justo donde el pulgar empieza el
      arrastre y si captura el gesto, el giro se pierde. */
   #hud { position:fixed; left:50%; transform:translateX(-50%); width:var(--stage);
-         bottom:max(calc(var(--u)*3), env(safe-area-inset-bottom));
-         display:flex; justify-content:space-around; align-items:flex-start;
+         bottom:max(calc(var(--uh)*6), env(safe-area-inset-bottom));
+         display:flex; justify-content:center; align-items:flex-start; gap:calc(var(--uh)*5);
          pointer-events:none; }
   .hblock { display:flex; flex-direction:column; align-items:center; }
+  .wp--plate { --h:max(54px, calc(var(--uh)*15)); --lip:max(4px, calc(var(--uh)*1.2)); --gloss:.22;
+               width:max(137px, calc(var(--uh)*38));
+               min-width:0; padding:0; flex-direction:column; }
   /* .wide (la pone resize() cuando caben): cada marcador sale a la franja libre
      de su lado —entre el margen seguro y el halo, medida a su altura— y se
      centra en ella, a la misma altura. --chord lo escribe wideStage(). */
-  .wide #hud { left:0; width:100%; transform:none; justify-content:space-between;
+  .wide #hud { left:0; width:100%; transform:none; justify-content:space-between; gap:0;
                padding:0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
   .wide .hblock { width:calc(50vw - var(--chord) - env(safe-area-inset-left)); }
   .wide .hblock + .hblock { width:calc(50vw - var(--chord) - env(safe-area-inset-right)); }
-  .hlabel { font-size:max(12px, calc(var(--u)*2.9)); letter-spacing:2px;
-            line-height:1.3; color:#5c6090; }
-  .hval   { font-size:max(22px, calc(var(--u)*6.2)); letter-spacing:1px;
-            line-height:1.3; color:#cfd2e6; }
+  .wp .hlabel { position:absolute; top:0; left:50%; transform:translate(-50%,-55%);
+            font-size:max(12px, calc(var(--uh)*3.4)); --sw:.24em; letter-spacing:.06em;
+            color:var(--label); white-space:nowrap; }
+  /* Baloo trae las cifras tabulares pero desactivadas: sin tabular-nums el número
+     cambia de ancho al sumar */
+  .wp .hval { position:relative; top:.08em; font-size:max(34px, calc(var(--uh)*9.5)); --sw:.14em;
+              font-variant-numeric:tabular-nums; transform-origin:50% 60%; }
+  /* salto del marcador al sumar, teñido con el tono del último flotante (--tint,
+     lo pone frame()). El récord no salta nunca. */
+  .hval.bump { animation:bump .32s ease-out; }
+  @keyframes bump { 30% { transform:scale(1.22); color:var(--tint, var(--pearl)); } }
+  @media (prefers-reduced-motion: reduce){ .hval.bump { animation:none; } }
   /* Micro-tutorial: mismo esqueleto que el HUD, en la franja de arriba. No
      reserva altura: la esfera se coloca como si no estuviera y el tip se
      superpone sobre la franja alta del área de juego. Es absolute respecto al
@@ -59,36 +132,36 @@
          top:max(calc(var(--u)*2.4), env(safe-area-inset-top));
          text-align:center; pointer-events:none; }
   /* El tip es la única prosa del juego: se lee una vez, corriendo y a contrarreloj.
-     Rompe el monoespaciado del resto de la interfaz a propósito —una frase larga
-     en mono se lee peor—. Baja lo que ocupaba el rótulo de nivel que tenía encima
-     más su aire (hoy 9,4u desde arriba): así pasa justo por debajo de los botones
-     de las esquinas, que llegan a 9,3u. El fade es asimétrico: entra rápido para
-     no hacerse esperar, sale despacio para no cortar al que todavía está leyendo;
-     la clase .on conmuta las dos duraciones.
+     Mismo texto con filo que el resto, pero a peso 600 y con el filo más fino: en
+     prosa minúscula, más peso o más trazo cierran los ojos de la e, la a y la o.
+     Arranca justo por debajo de los botones de las esquinas —su alto, su labio y
+     1,6u de aire, medidos desde el top de #lvl, que va .8u más bajo que ellos—.
+     El fade es asimétrico: entra rápido para no hacerse esperar, sale despacio
+     para no cortar al que todavía está leyendo; la clase .on conmuta las dos
+     duraciones.
      Los suelos en px mandan en el móvil en vertical, donde la columna es el ancho
-     de la pantalla y 3,6u se queda en 14 px: con el suelo de 15 no se leía en un
-     móvil real. 18 px es cuerpo de lectura de móvil, y el ancho mínimo de 360 px
+     de la pantalla. 18 px es cuerpo de lectura de móvil, y el ancho mínimo de 360 px
      (sin pasar del borde) evita que el texto más largo apile cuatro líneas sobre
-     la esfera. En escritorio y tablet la columna ya los supera y no cambia nada. */
-  .lvl-tip { position:absolute; top:calc(max(15.6px, var(--u)*3.77) + var(--u)*3.2); left:50%;
+     la esfera. */
+  .lvl-tip { position:absolute; top:calc(max(40px, var(--u)*11) + var(--u)*1.7); left:50%;
              transform:translateX(-50%);
              width:max(84%, min(100% - 24px, 360px));
-             font-size:max(18px, calc(var(--u)*3.6)); line-height:1.5;
-             font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-             color:#cfd2e6; text-shadow:0 1px 6px rgba(4,4,12,.95);
+             font-size:max(18px, calc(var(--u)*5.6)); --sw:.13em; font-weight:600; line-height:1.25;
              opacity:0; transition:opacity .6s ease; }
   .lvl-tip.on { opacity:1; transition:opacity .3s ease; }
   /* Contenido del tip. El tutorial de controles cambia de fase con el tip ya a la
      vista: el contenido nuevo no pasa por el fade de .on, entra con el suyo. */
   .tip-in { display:block; animation:tipIn .25s ease; }
   @keyframes tipIn { from { opacity:0; } }
-  /* Glifos del tutorial de controles (símbolos en #glyphs). Nada reserva altura
-     en el layout: la fila cuelga del tip, que ya se superpone. La sombra es la
-     del texto, pasada a filter para que se lean igual sobre el tablero. */
+  /* Glifos del tutorial de controles (símbolos en #glyphs, instanciados con <use>
+     por glyph()). Nada reserva altura en el layout: la fila cuelga del tip, que
+     ya se superpone. Perla con filo de tinta, como el texto: el contorno lo pone
+     el CSS, los paths no se tocan. */
   .glyphs { display:flex; justify-content:center; align-items:center; gap:calc(var(--u)*3);
-            margin-top:calc(var(--u)*1.6); overflow:visible;
-            filter:drop-shadow(0 1px 6px rgba(4,4,12,.95)); }
+            margin-top:calc(var(--u)*1.6); overflow:visible; }
   .gl { position:relative; }
+  .gl use { color:var(--pearl); stroke:var(--ink); stroke-width:2.4; paint-order:stroke fill;
+            stroke-linejoin:round; }
   .gl svg { display:block; height:max(44px, calc(var(--u)*12)); width:auto; overflow:visible; }
   /* el vaivén reserva su recorrido: la fila no salta al moverse la mano */
   .gl.sway { padding:0 calc(var(--u)*5); }
@@ -102,16 +175,18 @@
   @keyframes keyL { 0% { opacity:0; } 50%,100% { opacity:1; } }
   /* pulsación: el glifo se hunde sobre su punto de contacto (--o, lo pone
      glyph()) y el anillo sale de ahí, por detrás. El anillo es lo que enseña
-     el hard drop y va en amarillo, grueso y sin apagarse hasta pasada la mitad
-     de su crecida: en el gris del glifo apenas se veía, y en el ratón nace
-     tapado por el botón relleno. */
+     el hard drop y va en lima con filo de tinta (dos círculos iguales, el de
+     tinta debajo y más ancho), grueso y sin apagarse hasta pasada la mitad de
+     su crecida: en el perla del glifo un anillo claro apenas se vería, y en el
+     ratón nace tapado por el botón relleno. */
   .press .fig { transform-origin:var(--o); animation:press 1.2s ease-in-out infinite; }
   @keyframes press { 0%,24%,100% { transform:none; }
                      12% { transform:translateY(calc(var(--u)*.6)) scale(.95); } }
   .press .ring { position:absolute; left:0; top:0; }
-  .ring circle { fill:none; stroke:#ffd23f; stroke-width:2.4;
+  .ring circle { fill:none; stroke:var(--lime); stroke-width:2.4;
                  transform-box:fill-box; transform-origin:center;
                  animation:ring 1.2s ease-out infinite; }
+  .ring circle.edge { stroke:var(--ink); stroke-width:4; }
   @keyframes ring { 0%,7.99% { transform:scale(.3); opacity:0; }
                     8%       { transform:scale(.3); opacity:1; }
                     36%      { opacity:.9; }
@@ -121,58 +196,69 @@
     .k-l { opacity:0; }
     .ring circle { transform:scale(1.05); opacity:.8; }
   }
-  .btn { min-width:max(132px, calc(var(--u)*34)); padding:0 max(16px, calc(var(--u)*4));
-         height:max(46px, calc(var(--u)*11)); border:1.5px solid #4a4f7a;
-         border-radius:8px; background:rgba(30,34,60,.55); color:#cfd2e6;
-         font-size:max(14px, calc(var(--u)*3.4)); letter-spacing:2px; font-family:inherit; display:flex; align-items:center;
-         justify-content:center; user-select:none; cursor:pointer; }
   /* chrome, no HUD: se ancla a la esquina física de la pantalla, no a la
      columna. Anclado a la columna, en landscape --stage se estrecha y el botón
      acaba flotando en mitad del viewport. Pausa a la derecha, fullscreen a la
      izquierda; los dos con la misma pieza. La esquina izquierda es la que Safari
      ocupa con su X en la pantalla completa del iPad, y no deja moverla: ahí va
-     el botón que en pantalla completa desaparece (ver syncFS). */
-  #fs, #pz { position:fixed; top:max(calc(var(--u)*1.6), env(safe-area-inset-top));
-        width:max(34px, calc(var(--u)*7.7)); height:max(34px, calc(var(--u)*7.7));
-        display:flex; align-items:center; justify-content:center; border:1.5px solid #3a3f68;
-        border-radius:7px; background:rgba(30,34,60,.5); color:#9aa0cc;
-        font-size:max(15px, calc(var(--u)*3.4));
-        cursor:pointer; user-select:none; z-index:5; }
+     el botón que en pantalla completa desaparece (ver syncFS). La pieza es
+     .wp--icon; los iconos, SVG inline (un glifo de texto sale como emoji en iOS
+     y Android). */
+  #fs, #pz { position:fixed; top:max(calc(var(--u)*1.6), env(safe-area-inset-top)); z-index:5; }
   #fs { left:max(calc(var(--u)*2), env(safe-area-inset-left)); }
-  #pz { right:max(calc(var(--u)*2), env(safe-area-inset-right)); gap:.26em; }
-  /* las dos barras en CSS y no el glifo ⏸: en iOS y Android sale como emoji */
-  #pz::before, #pz::after { content:""; width:.26em; height:.9em; border-radius:1px;
-        background:currentColor; }
-  #fs:active, #pz:active { background:rgba(70,80,140,.75); }
-  .btn:active { background:rgba(70,80,140,.75); }
-  .btn.arm { border-color:#f26b3a; color:#f26b3a; }
+  #pz { right:max(calc(var(--u)*2), env(safe-area-inset-right)); }
+  /* medidor de fps (temporal, ver fpsMeter()): arriba al centro, entre los dos
+     botones y a su altura, en el hueco que dejó el rótulo de nivel */
+  #fps { position:fixed; left:50%; transform:translateX(-50%);
+         top:max(calc(var(--u)*1.6), env(safe-area-inset-top));
+         height:max(40px, calc(var(--u)*11)); display:flex; align-items:center;
+         font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+         font-size:max(11px, calc(var(--u)*2.6)); white-space:nowrap;
+         font-variant-numeric:tabular-nums; color:#5c6090; pointer-events:none; z-index:5; }
   /* sonda: JS no lee env(); resize() mide su alto para no meter la esfera
      bajo la muesca */
   #safe-top { position:fixed; top:0; left:0; width:0; height:env(safe-area-inset-top);
               visibility:hidden; pointer-events:none; }
   /* game over y pausa: el mismo telón, con la misma composición. Solo responden
      los botones: un toque perdido no reanuda ni reinicia. El game over guarda el
-     hueco de CONTINUAR (.ghost) para que REINICIAR caiga en el mismo sitio. */
-  .ovl { position:fixed; inset:0; display:none; flex-direction:column; gap:calc(var(--u)*2);
-          align-items:center; justify-content:center; background:rgba(4,4,10,.82);
-          color:#e8e8f4; font-size:max(16px, calc(var(--u)*4)); letter-spacing:2px; }
-  .ovl b { font-size:max(26px, calc(var(--u)*6.9)); color:#f26b3a; letter-spacing:4px; }
-  .ovl .btn:first-of-type { margin-top:calc(var(--u)*2); }
-  .btn.ghost { visibility:hidden; }
+     hueco de CONTINUAR (.ghost) para que REINICIAR caiga en el mismo sitio.
+     El fondo es la gama activa oscurecida (--scrim, lo escribe showScrim() al
+     abrirlo), no un negro: el juego sigue viéndose detrás, sin backdrop-filter
+     porque draw() sigue pintando en pausa. */
+  .ovl { position:fixed; inset:0; display:none; flex-direction:column; gap:calc(var(--u)*3.4);
+         align-items:center; justify-content:center; background:rgba(20,15,46,.58);
+         background:color-mix(in srgb, var(--scrim, #140f2e) 58%, transparent); }
+  .ovl b { font-size:max(40px, calc(var(--u)*12)); --sw:.13em; color:var(--title); }
+  .ovl .pts { font-size:max(20px, calc(var(--u)*5.6)); --sw:.18em; font-variant-numeric:tabular-nums;
+              margin-bottom:calc(var(--u)*3); }
+  .ovl .pts small { font-size:.75em; font-weight:700; }
+  /* la pausa no enseña los puntos, pero #pfin sigue ocupando lo mismo que #fin:
+     así todo el telón cae donde en el game over */
+  #pfin { visibility:hidden; }
+  /* wordmark, encima del título. Tres topes: el 86 % del telón, 640 px (iPad,
+     para que no se estire) y el 22 % del alto (móvil en horizontal, donde manda
+     el alto; 3,426 es la proporción del WebP). Sin loading="lazy": el telón
+     está en display:none y la imagen tiene que llegar antes de la primera pausa.
+     La sombra es estática: el telón no se anima. */
+  .ovl .wordmark { width:min(86%, 640px, calc(22vh * 3.426)); height:auto;
+                   margin-bottom:calc(var(--u)*4); pointer-events:none; user-select:none;
+                   filter:drop-shadow(0 calc(var(--u)*1) calc(var(--u)*1.5) rgba(20,14,50,.35)); }
   /* volver a ver los tutoriales: fuera de la composición centrada del telón,
      anclado abajo y con aspecto de enlace, para no competir con los botones.
-     En columna va justo encima del HUD —su bottom más la altura de etiqueta y
-     número, suelos incluidos— para no pisar los marcadores, que se transparentan
-     bajo el telón; en .wide están a los lados y baja hasta el borde. */
+     En columna va justo encima del HUD —su bottom más el alto de la placa y lo
+     que la etiqueta asoma por encima (55 %), suelos incluidos— para no pisar los
+     marcadores, que se transparentan bajo el telón; en .wide están a los lados y
+     baja hasta el borde. */
   .tut-again { position:absolute; left:50%; transform:translateX(-50%);
-               bottom:calc(max(calc(var(--u)*3), env(safe-area-inset-bottom))
-                           + max(15.6px, calc(var(--u)*3.77)) + max(28.6px, calc(var(--u)*8.06))
+               bottom:calc(max(calc(var(--uh)*6), env(safe-area-inset-bottom))
+                           + max(54px, calc(var(--uh)*15)) + max(12px, calc(var(--uh)*3.4))*.55
                            + var(--u)*2);
                padding:calc(var(--u)*2) calc(var(--u)*4); white-space:nowrap;
-               font-size:max(13px, calc(var(--u)*3)); letter-spacing:1px; color:#9aa0cc;
-               text-decoration:underline; text-underline-offset:.25em; cursor:pointer; }
+               font-size:max(16px, calc(var(--u)*4.6)); --sw:.2em; font-weight:700;
+               text-decoration:underline; text-decoration-thickness:.1em; text-underline-offset:.25em;
+               cursor:pointer; }
   .wide .tut-again { bottom:max(calc(var(--u)*3), env(safe-area-inset-bottom)); }
-  .tut-again:active { color:#cfd2e6; }
+  .tut-again.press { color:var(--label); }
 </style>
 </head>
 <body>
@@ -188,21 +274,28 @@
 </svg>
 <canvas id="c"></canvas>
 <div id="hud">
-  <div class="hblock"><span class="hlabel" data-t="score"></span><span class="hval" id="score">0</span></div>
-  <div class="hblock"><span class="hlabel" data-t="best"></span><span class="hval" id="bestv">0</span></div>
+  <div class="hblock"><div class="wp wp--glass wp--plate">
+    <span class="hlabel ol" data-t="score"></span><span class="hval ol" id="score">0</span></div></div>
+  <div class="hblock"><div class="wp wp--glass wp--plate">
+    <span class="hlabel ol" data-t="best"></span><span class="hval ol" id="bestv">0</span></div></div>
 </div>
 <div id="lvl">
-  <div class="lvl-tip"></div>
+  <div class="lvl-tip ol"></div>
 </div>
-<div id="pz"></div>
-<div id="fs">⛶</div>
+<div id="pz" class="wp wp--glass wp--icon tap"><svg viewBox="0 0 24 24"><rect class="ico" x="5" y="4" width="5" height="16" rx="2"/><rect class="ico" x="14" y="4" width="5" height="16" rx="2"/></svg></div>
+<div id="fs" class="wp wp--glass wp--icon tap"><svg viewBox="0 0 24 24"><path class="ico" d="M3 9V5a2 2 0 0 1 2-2h4v3H6v3zM15 3h4a2 2 0 0 1 2 2v4h-3V6h-3zM21 15v4a2 2 0 0 1-2 2h-4v-3h3v-3zM9 21H5a2 2 0 0 1-2-2v-4h3v3h3z"/></svg></div>
+<div id="fps"></div>
 <div id="safe-top"></div>
-<div id="over" class="ovl"><b data-t="over"></b><span id="fin">0</span>
-  <div class="btn ghost" data-t="resume"></div><div class="btn" id="again" data-t="restart"></div>
-  <div class="tut-again" data-t="tutAgain"></div></div>
-<div id="pause" class="ovl"><b data-t="pause"></b><span id="pfin">0</span>
-  <div class="btn" id="resume" data-t="resume"></div><div class="btn" id="restart" data-t="restart"></div>
-  <div class="tut-again" data-t="tutAgain"></div></div>
+<div id="over" class="ovl"><img class="wordmark" src="img/whirlpop-wordmark.webp" width="1600" height="467" alt="Whirlpop" draggable="false">
+  <b class="ol" data-t="over"></b><span class="pts ol" id="fin">0</span>
+  <div class="wp wp--lime ghost"><span class="ol" data-t="resume"></span></div>
+  <div class="wp wp--lime tap" id="again"><span class="ol" data-t="restart"></span></div>
+  <div class="tut-again ol" data-t="tutAgain"></div></div>
+<div id="pause" class="ovl"><img class="wordmark" src="img/whirlpop-wordmark.webp" width="1600" height="467" alt="Whirlpop" draggable="false">
+  <b class="ol" data-t="pause"></b><span class="pts ol" id="pfin" aria-hidden="true">0</span>
+  <div class="wp wp--lime tap" id="resume"><span class="ol" data-t="resume"></span></div>
+  <div class="wp wp--glass tap" id="restart"><span class="ol" data-t="restart"></span></div>
+  <div class="tut-again ol" data-t="tutAgain"></div></div>
 
 <script>
 "use strict";
@@ -357,8 +450,8 @@ const SPIRAL_BRAKE   = 0.45;   // suelo del ritmo, fracción del de fuera
 // (1,3) y (3,1), que con 3.0 exactas se quedarían fuera. Al núcleo lo excluye
 // fireBonus(), no el disco.
 const BOMB_R = 3.2, BOMB_R2 = BOMB_R*BOMB_R;
-const BOMB_COL  = "#f26b3a";   // la bola y su texto
-const BOMB_FILL = "#ffa06b";   // el relleno del anillo que la carga
+const BOMB_COL  = "#f26b3a";   // su texto; la bola es lima, como el rayo que la carga
+const BOMB_SHADE = "#a83600";  // el filo de color de su texto: la sombra del ámbar
 function bombHits(c,r){ return (q,s) => (q-c)*(q-c) + (s-r)*(s-r) <= BOMB_R2; }
 // Las blancas tienen su propio reloj, pero caen como las de color. Su reloj SUMA
 // al de las de color, no lo ocupa, así que el suelo de 3 s contra el de 0,95 s
@@ -373,6 +466,7 @@ function bombHits(c,r){ return (q,s) => (q-c)*(q-c) + (s-r)*(s-r) <= BOMB_R2; }
 const WHITE_INT_START = 8, WHITE_INT_MIN = 3.0, WHITE_INT_RAMP = 200;
 const WHITE_SPREAD = 50 * Math.PI/180;   // dispersión alrededor del punto opuesto
 const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
+const STONE_REWIND = .4;                  // s que tarda en deshacerse un aviso entero tras un match de 2
 const TELEGRAPH = 1.25;                     // aviso previo a la salida de cada ficha
 const TELEGRAPH_ARC = 35 * Math.PI/180;     // amplitud del aviso
 // Sinusoide: no es un tipo de ficha, es otra forma de llegar. Entra por un eje
@@ -412,10 +506,10 @@ const TOP_KEEP = 0.09;
 // derivan de ese aire en resize(), no se escriben a mano, para que la relación
 // aguante al calibrar cualquiera de los tres grosores.
 const RING_GAP    = 0.0085;      // aire entre trazos contiguos, múltiplo de PS
-const GAUGE_W     = 0.008;       // trazo del gauge
-const BORDER_W    = 0.012;       // frontera = GAUGE_W * 1.5
-const TELE_W      = 0.018;       // aviso    = BORDER_W * 1.5
-const TELE_HALO_W = 0.085;       // resplandor del aviso: fuera de la progresión
+const GAUGE_W     = 0.008;       // trazo del gauge de antes: ya solo sitúa el radio del rayo
+const BORDER_W    = 0.012;       // frontera = GAUGE_W * 1.5; no se traza, solo sitúa los otros dos
+const TELE_W      = 0.018;       // aviso    = BORDER_W * 1.5: núcleo opaco
+const TELE_HALO_W = 0.10;        // resplandor del aviso: fuera de la progresión
 // borde exterior del halo: lo más lejano que se dibuja del juego (las fichas
 // nacen a 0.52 y no llegan). En landscape la esfera se escala contra él.
 const HALO_R      = R_FACTOR + BORDER_W/2 + RING_GAP + TELE_HALO_W;
@@ -431,15 +525,24 @@ const GAUGE_MAX   = 360;
 // premio quede a un match de distancia y se vea para qué sirve. Un cuarteto (40)
 // lo cierra de una; a base de tríos (15) hacen falta tres.
 const GAUGE_INTRO = 324;
-const GAUGE_TRACK = "#2a2e4a";
-// alerta de muerte. No comparte familia ni con el gauge —que sería concéntrico y
-// del color del premio a la vez— ni con el rojo COL[0] que late detrás en el montón.
-const DANGER      = "#ff2d4a";
-
-// 4 colores base + morado, que entra con el nivel 5
-const COL = ["#e0392b","#f2c53d","#2f6fd0","#3aa655","#a259e0"];
+// 4 colores base + morado, que entra con el nivel 5. Cada joya tiene tres tonos:
+// luz (vira a cálido), base saturada y sombra (vira a frío); COL es la base, y
+// con ella casan el aviso de lanzamiento y los flotantes. La esmeralda tira a
+// turquesa para no confundirse con la lima del rayo.
+const JEWEL = [                            // [luz, base, sombra]
+  [[255,150,160],[222, 28, 72],[ 96,  0, 52]],   // rubí
+  [[255,236,140],[255,168, 12],[168, 54,  0]],   // ámbar
+  [[140,205,255],[ 34, 98,240],[ 18, 20,120]],   // zafiro
+  [[150,245,215],[  0,178,140],[  0, 70, 84]],   // esmeralda
+  [[235,175,255],[164, 56,226],[ 64,  6,120]],   // amatista
+];
+const JEWEL_WHITE = [[255,255,255],[232,236,248],[110,118,160]];   // perla
+const JEWEL_BONUS = [[238,255,190],[160,232, 18],[ 52,100,  0]];   // lima, la del rayo
+const hexRGB = c => "#"+c.map(v=>v.toString(16).padStart(2,"0")).join("");
+const COL = JEWEL.map(([,b])=>hexRGB(b));
+// sombra de cada joya: el filo de color de los flotantes, entre la tinta y el tono
+const SHADE = JEWEL.map(([,,s])=>hexRGB(s)), SHADE_WHITE = hexRGB(JEWEL_WHITE[2]);
 const WHITE = 8, STONE = 9;                // fuera del rango de índices de color
-const PAINT = { 8:"#eef0f6", 9:"#484c5c" };
 function numColors(){ return level >= 5 ? 5 : 4; }
 // El sistema de carga es la única mecánica que puede adelantarse al calendario:
 // con su tutorial ya leído está disponible desde el frame cero. El
@@ -555,13 +658,16 @@ const GLYPH = {
   keys:  {               vb:[ 8.5, 16.5, 47,   31  ], at:[32, 40] },
 };
 // El <svg> exterior mide lo mismo que la caja del símbolo pero con origen en 0:
-// el <use> ocupa el 100% y el anillo se sitúa restando la esquina.
+// el <use> ocupa el 100% y el anillo se sitúa restando la esquina. El anillo son
+// dos círculos iguales con la misma animación: el filo de tinta debajo, la lima
+// encima.
 function glyph(g, cls, uses, ring){
   const [x,y,w,h] = g.vb, px = g.at[0]-x, py = g.at[1]-y;
   const box = `viewBox="0 0 ${w} ${h}"`;
   const body = uses.map(([id,c]) => `<use href="#${id}"${c ? ` class="${c}"` : ""}/>`).join("");
+  const circ = c => `<circle${c} cx="${px}" cy="${py}" r="${g.ring}"/>`;
   return `<span class="gl ${cls}">` +
-    (ring ? `<svg class="ring" ${box}><circle cx="${px}" cy="${py}" r="${g.ring}"/></svg>` : "") +
+    (ring ? `<svg class="ring" ${box}>${circ(' class="edge"')}${circ("")}</svg>` : "") +
     `<svg class="fig" ${box} style="--o:${(px/w*100).toFixed(1)}% ${(py/h*100).toFixed(1)}%">${body}</svg></span>`;
 }
 function ctrlGlyphs(){
@@ -619,6 +725,8 @@ const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,DPR,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
 let grid, angle, angleT, anglePrev, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, deadBall, outBall, nextSpawn, whiteT, lastColorAngle;
 let level, tipT, gaugeEarly, forceK, prevSine, forceSine;
+// el aviso de la ficha que acaba de salir: solo lo lee el dibujo (ver drawTele())
+let teleOut;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved, wheelAcc;
 let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
 let bestSaved;
@@ -825,6 +933,7 @@ function reset(){
   floaters = []; cascadeF = null;
   flashT = 0; flashSet = new Set(); flashBonus = false;
   pendingBonus = null;
+  alarm = 0; flowPrev = 0;                   // angle vuelve a 0 más abajo: sin empujón
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
   // ya asentadas, con la forma de place(): ni caen ni puntúan al aparecer
   if (ctrlPending())
@@ -835,7 +944,7 @@ function reset(){
   ctrlTurn = false;
   angle = angleT = anglePrev = angleD0 = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
   simTick = 0;
-  spawnT = 0.9; whiteT = WHITE_INT_START; dead = false; deadBall = outBall = null; lastColorAngle = null;
+  spawnT = 0.9; teleOut = null; whiteT = WHITE_INT_START; dead = false; deadBall = outBall = null; lastColorAngle = null;
   forceK = null; prevSine = false; forceSine = null;
   // arranque en un nivel concreto (?nivel=N): toda la dificultad se deriva de
   // `t`, así que basta con adelantar el reloj. La progresión se encadena sola en
@@ -861,8 +970,7 @@ function reset(){
 
 const safeTopEl = document.getElementById("safe-top");
 const hudBlocks = document.querySelectorAll("#hud .hblock");
-const hudLabels = document.querySelectorAll("#hud .hlabel");
-const hudVals   = document.querySelectorAll("#hud .hval");
+const hudPlates = document.querySelectorAll("#hud .wp--plate");
 
 // En landscape sobra pantalla a los lados de la columna. Si en esas franjas caben
 // los marcadores, salen de debajo de la esfera y la columna ya solo tiene que
@@ -882,15 +990,11 @@ function wideStage(col){
   root.style.setProperty("--stage", hMax+"px");
   root.style.setProperty("--chord", "0px");
   root.classList.add("wide");
-  // los textos tienen suelo en px: se miden, no se calculan. Todo se mide a
+  // las placas tienen suelo y techo en px: se miden, no se calculan. Todo se mide a
   // hMax, que es el peor caso: con un STAGE menor el HUD encoge y baja.
-  // Manda lo más ancho de cada marcador: su etiqueta o un número de seis cifras,
-  // que ya pasa a MI RÉCORD. El número se mide con el que haya escrito: la fuente
-  // es monoespaciada, así que cada cifra ocupa lo mismo.
+  // Las placas son de ancho fijo y el texto va dentro: manda su ancho.
   let lab = 0;
-  for (const e of hudLabels) lab = Math.max(lab, e.getBoundingClientRect().width);
-  for (const e of hudVals)
-    lab = Math.max(lab, e.getBoundingClientRect().width / Math.max(1, e.textContent.length) * 6);
+  for (const e of hudPlates) lab = Math.max(lab, e.getBoundingClientRect().width);
   // los marcadores van abajo, donde el círculo es más estrecho: la franja libre
   // se mide a la altura de su borde superior, no en el ecuador
   const dy = hudBlocks[0].getBoundingClientRect().top - H/2;
@@ -935,8 +1039,8 @@ function resize(){
   // pasaba en las diagonales, y el mismo montón moría o no según el giro.
   PS = STAGE; R = PS*R_FACTOR; CELL = PS*CELL_PS;
   // la frontera manda: los otros dos anillos se sitúan a RING_GAP de su trazo.
-  // Del aviso se guarda el borde INTERIOR, porque su grosor late con la cuenta
-  // atrás y el aire debe ser el mismo en todo el latido, no solo en el pico.
+  // Del aviso se guarda el borde INTERIOR: núcleo y resplandor crecen solo hacia
+  // fuera desde él, y el aire contra la frontera no depende de su latido.
   gaugeRad  = R - PS*(BORDER_W/2 + RING_GAP + GAUGE_W/2);
   teleRadIn = R + PS*(BORDER_W/2 + RING_GAP);
 
@@ -956,6 +1060,7 @@ function resize(){
   }
 
   ox = W/2; oy = H/2 - lift;
+  bakeBg(); syncBubOut(); bakeBalls(); bakeTele();
 }
 addEventListener("resize", resize);
 // en móvil el alto real llega tarde al girar el dispositivo
@@ -1029,7 +1134,7 @@ function spawnNormal(n){
   const a = n.a, d = 0.52;
   const x = Math.cos(a)*d, y = Math.sin(a)*d;
   lastColorAngle = a;
-  flying.push({ bonus:false, k:n.k, hard:false, trail:[],
+  flying.push({ born:t, bonus:false, k:n.k, hard:false,
                 x, y, px:x, py:y,
                 ux:-Math.cos(a), uy:-Math.sin(a), sp:BUBBLE_SPEED,
                 acc:FALL_ACCEL });
@@ -1070,7 +1175,7 @@ function spawnSine(n){
   const x = ex*d, y = ey*d;
   const A = SINE_AMP, w = Math.PI*n.cyc/d;
   lastColorAngle = a;                      // las blancas siguen saliendo enfrente
-  flying.push({ bonus:false, k:n.k, hard:false, trail:[],
+  flying.push({ born:t, bonus:false, k:n.k, hard:false,
                 x, y, px:x, py:y,
                 sp:SINE_SPEED, acc:0,      // la sinusoide no cae: cruza
                 sine:{ s:d, s0:d, ex, ey, sig:n.sig,
@@ -1083,7 +1188,7 @@ function spawnWhite(){
   const a = base + (Math.random()-0.5)*WHITE_SPREAD;
   const d = 0.52;
   const x = Math.cos(a)*d, y = Math.sin(a)*d;
-  flying.push({ bonus:false, k:WHITE, hard:false, trail:[],
+  flying.push({ born:t, bonus:false, k:WHITE, hard:false,
                 x, y, px:x, py:y,
                 ux:-Math.cos(a), uy:-Math.sin(a), sp:BUBBLE_SPEED,
                 acc:FALL_ACCEL });
@@ -1093,8 +1198,8 @@ function spawnWhite(){
 function spawnBonus(){
   const a = GAUGE_A0;
   const x = Math.cos(a)*0.50, y = Math.sin(a)*0.50;
-  flying.push({ bonus:true, th:a, r:0.50,
-                dir: Math.random()<0.5?1:-1, trail:[],
+  flying.push({ born:t, bonus:true, th:a, r:0.50,
+                dir: Math.random()<0.5?1:-1,
                 x, y, px:x, py:y });
 }
 
@@ -1109,7 +1214,6 @@ function stepFlying(dt){
       b.th += SPIRAL_TANGENT*b.dir*dt*pace*(0.16/Math.max(b.r,0.05));
       b.r  -= SPIRAL_INWARD*dt*pace;
       b.x = Math.cos(b.th)*b.r; b.y = Math.sin(b.th)*b.r;
-      b.trail.push([b.x,b.y]); if (b.trail.length>22) b.trail.shift();
     } else {
       b.sp += (b.hard?HARD_ACCEL:b.acc)*dt;          // acelera al caer
       if (b.sine){
@@ -1153,9 +1257,6 @@ function stepFlying(dt){
         [b.x, b.y] = sineAt(q, q.s);
       } else {
         b.x += b.ux*b.sp*dt; b.y += b.uy*b.sp*dt;
-      }
-      if (b.hard){
-        b.trail.push([b.x,b.y]); if (b.trail.length>10) b.trail.shift();
       }
     }
     const shot = rayCast(b);
@@ -1497,7 +1598,8 @@ function refreshGroup(c,r){
     }
   }
   if (grp.length < 2 || grp.length >= CHAIN_MIN) return;
-  grp.forEach(i=>{ grid[i].age = 0; });
+  // `rew` es solo dibujo: la edad que aún se ve mientras el aviso se deshace (easeVisual)
+  grp.forEach(i=>{ const h = grid[i]; h.rew = Math.max(h.rew || 0, h.age); h.age = 0; });
 }
 
 // La bola de fuera (OUT) entra en los grupos por adyacencia con su celda de
@@ -1657,7 +1759,7 @@ function commitFlash(){
 
   if (flashBonus){
     const pts = flashSet.size*5;
-    const f = addFloater([...flashSet], pts, BOMB_COL);
+    const f = addFloater([...flashSet], pts, BOMB_COL, BOMB_SHADE);
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
     // barrido limpio: si no queda una sola bola, el premio se multiplica. El
     // texto lo cuenta como una cadena —dobla y engorda por pasos, con el ritmo
@@ -1669,15 +1771,15 @@ function commitFlash(){
     // puntuación y carga se calculan POR GRUPO, no sobre el total. En cascada
     // los puntos no sacan texto propio: engordan el de la cadena (ver cascadeF)
     for (const comp of splitComponents(flashSet)){
-      let tone = "#ffffff";
+      let tone = "#ffffff", shade = SHADE_WHITE;
       for (const i of comp){
         const g = i===OUT ? outBall : grid[i];
-        if (g && g.k>=0 && g.k!==WHITE && g.k!==STONE){ tone = COL[g.k]; break; }
+        if (g && g.k>=0 && g.k!==WHITE && g.k!==STONE){ tone = COL[g.k]; shade = SHADE[g.k]; break; }
       }
       const n = comp.length;
       const pts = n * 5 * scoreMultForSize(n) * cm;
       if (chained) cascadeF.pts += pts;
-      else { const f = addFloater(comp, pts, tone); if (!first) first = f; }
+      else { const f = addFloater(comp, pts, tone, shade); if (!first) first = f; }
       score += pts;
       // sin carga disponible los matches puntúan igual pero no cargan nada: el
       // anillo aparece a cero cuando abre, sin arrastre de lo anterior.
@@ -1778,10 +1880,13 @@ function popCentroid(cells){
   for (const i of cells){ const [c,r] = cellOf(i); sc += c; sr += r; }
   return [sc/cells.length, sr/cells.length];
 }
-function addFloater(cells, pts, tone){
+// `lastTone` es solo presentación: tiñe el salto del marcador (ver frame())
+let lastTone = null;
+function addFloater(cells, pts, tone, shade){
   const [fc,fr] = popCentroid(cells);
-  const f = { fc, fr, pts, tone, life:0, rise:0, held:false, links:1, bump:0, x2:0, x2T:0 };
+  const f = { fc, fr, pts, tone, shade, life:0, rise:0, held:false, links:1, bump:0, x2:0, x2T:0 };
   floaters.push(f);
+  lastTone = tone;
   return f;
 }
 // arranca el doblado del barrido limpio: se retiene quieto mientras dobla
@@ -1811,13 +1916,20 @@ function drawFloaters(){
     cx.globalAlpha = p<0.72 ? 1 : 1-(p-0.72)/0.28;
     cx.translate(x, y - f.rise*CELL);
     cx.scale(scale, scale);
-    cx.font = `700 ${Math.round(CELL*0.95)}px ui-monospace, Menlo, Consolas, monospace`;
-    cx.textAlign = "center"; cx.textBaseline = "middle";
-    cx.lineWidth = Math.max(3, CELL*0.16);
-    cx.strokeStyle = "rgba(4,4,12,.92)";
-    cx.strokeText("+"+f.pts, 0, 0);
+    // Baloo tiene la mayúscula baja (0,60 em) y la caja alta: más cuerpo que una
+    // mono y centrado a mano sobre la línea base, porque "middle" la descentra.
+    // Tres pasadas: filo de tinta, filo de la sombra de la joya y relleno.
+    const fpx = Math.round(CELL*1.12), txt = "+"+f.pts, ty = 0.30*fpx;
+    cx.font = `800 ${fpx}px "Whirlpop Baloo", sans-serif`;
+    cx.textAlign = "center"; cx.textBaseline = "alphabetic"; cx.lineJoin = "round";
+    cx.lineWidth = Math.max(5, CELL*0.3);
+    cx.strokeStyle = "#231a4c";
+    cx.strokeText(txt, 0, ty);
+    cx.lineWidth = Math.max(3, CELL*0.17);
+    cx.strokeStyle = f.shade;
+    cx.strokeText(txt, 0, ty);
     cx.fillStyle = f.tone;
-    cx.fillText("+"+f.pts, 0, 0);
+    cx.fillText(txt, 0, ty);
     cx.restore();
   }
 }
@@ -1831,6 +1943,8 @@ function easeVisual(dt){
     if (b.vc === undefined){ b.vc = c; b.vr = r; }
     b.vc += (c - b.vc)*k;
     b.vr += (r - b.vr)*k;
+    // el aviso desanda su camino a ritmo fijo: entero en STONE_REWIND s
+    if (b.rew) b.rew = b.rew > STONE_WARN ? b.rew - dt*(STONE_TIME-STONE_WARN)/STONE_REWIND : 0;
   }
 }
 
@@ -1850,7 +1964,7 @@ function easeVisual(dt){
 // Tutorial del nivel 2: las bolas de color más viejas de la superficie —con un
 // hueco jugable al lado, donde se ven y donde el jugador aún podría salvarlas— se
 // ponen a STONE_DEMO s de petrificarse, una tras otra dentro de la ventana de
-// lectura (6,3 s). Su aviso gris sale ya grueso y rápido, y las piedras caen de
+// lectura (6,3 s). Su aviso sale ya agrietado y avanza deprisa, y las piedras caen de
 // una en una con el texto a la vista. Ninguna se rejuvenece, y lo que está
 // destellando no cuenta: va a estallar. Sin azar: se desempata por índice.
 const STONE_DEMO = [2, 3.5, 5];
@@ -2123,9 +2237,23 @@ function pause(){
   loseInput();               // Alt-Tab con algo pulsado no puede dejarlo girando
   if (dead || paused) return;
   paused = true;
-  document.getElementById("pfin").textContent = score+" "+tr("points");
+  setPts(document.getElementById("pfin"));
+  showScrim(pauseEl);
   syncTutAgain();
   syncPause();
+}
+// Puntos del telón: el número tabular y la palabra más pequeña. Solo reescribe
+// si cambian: el game over lo pide en cada frame.
+function setPts(el){
+  if (el.dataset.v === String(score)) return;
+  el.dataset.v = score;
+  el.innerHTML = score + " <small>" + tr("points") + "</small>";
+}
+// Fondo del telón: la gama activa de abajo, mezclada al 45 % con negro. Se fija
+// al abrirlo, no en cada frame.
+function showScrim(el){
+  const c = bgPalette()[1].map(v => Math.round(v*0.55));
+  el.style.setProperty("--scrim", `rgb(${c})`);
 }
 function resume(){ paused = false; syncPause(); }
 function restart(){ flushIfDirty(); reset(); }    // el récord no espera al game over
@@ -2133,8 +2261,39 @@ addEventListener("blur", pause);
 addEventListener("pagehide", pause);
 document.addEventListener("visibilitychange", ()=>{ if (document.hidden) pause(); });
 addEventListener("pointercancel", e=>{ if (e.pointerType !== "mouse") pause(); });
+// Botones del chrome y del telón: se hunden al apretar y actúan al soltar, como
+// un botón nativo. Actuar en pointerdown cerraba el telón antes de pintar el
+// botón hundido. La captura hace llegar el move y el up aunque el dedo salga:
+// fuera del botón se levanta y soltar ahí no hace nada; volver a entrar lo
+// recupera. Un solo puntero por botón. El rectángulo se mide al apretar, antes
+// de hundirlo: medido hundido, el borde de arriba se movería con el labio y un
+// dedo justo ahí parpadearía. Si el botón desaparece mientras tanto (Esc, Espacio)
+// mide cero y soltar no hace nada.
 function tapBtn(el, fn){
-  el.addEventListener("pointerdown", e=>{ e.preventDefault(); e.stopPropagation(); fn(); });
+  let id = null, box = null;
+  const inside = e => el.getClientRects().length > 0 &&
+    e.clientX >= box.left && e.clientX <= box.right &&
+    e.clientY >= box.top  && e.clientY <= box.bottom;
+  const end = () => { id = null; el.classList.remove("press"); };
+  el.addEventListener("pointerdown", e=>{
+    if (e.button !== 0) return;                      // botón principal o cualquier toque
+    e.preventDefault(); e.stopPropagation();
+    if (id !== null) return;
+    id = e.pointerId; box = el.getBoundingClientRect();
+    try { el.setPointerCapture(id); } catch(_){}
+    el.classList.add("press");
+  });
+  el.addEventListener("pointermove", e=>{
+    if (e.pointerId === id) el.classList.toggle("press", inside(e));
+  });
+  el.addEventListener("pointerup", e=>{
+    if (e.pointerId !== id) return;
+    const hit = inside(e);
+    end();
+    if (hit) fn();
+  });
+  el.addEventListener("pointercancel", e=>{ if (e.pointerId === id) end(); });
+  el.addEventListener("lostpointercapture", e=>{ if (e.pointerId === id) end(); });
 }
 tapBtn(pzEl, pause);
 tapBtn(document.getElementById("resume"), resume);
@@ -2179,48 +2338,706 @@ function toggleFS(){
     : (document.exitFullscreen || document.webkitExitFullscreen).call(document);
   if (p && p.catch) p.catch(()=>{});    // rechazo sin gesto válido: no hay nada que hacer
 }
-fsEl.addEventListener("pointerdown", e=>{ e.preventDefault(); e.stopPropagation(); toggleFS(); });
+// al soltar sigue valiendo como gesto de usuario: un pointerup táctil lo es, y la
+// activación del pointerdown del ratón sigue vigente
+tapBtn(fsEl, toggleFS);
 for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
   document.addEventListener(ev, ()=>{ syncFS(); setTimeout(resize, 60); });
 addEventListener("keydown", e=>{ if (e.key==="f") toggleFS(); });
 
-// ─── dibujo ────────────────────────────────────────────────────────────────
-function bubble(x,y,fill,rad,spec,alpha){
-  cx.globalAlpha = alpha===undefined?1:alpha;
-  cx.beginPath(); cx.arc(x,y,rad,0,7); cx.fillStyle=fill; cx.fill();
-  if (spec){
-    cx.beginPath(); cx.arc(x-rad*0.32,y-rad*0.34,rad*0.24,0,7);
-    cx.fillStyle="rgba(255,255,255,.82)"; cx.fill();
+// ─── fondo ─────────────────────────────────────────────────────────────────
+// Lava que recorre gamas en bucle y se calienta con el peligro, burbujas, el
+// cuenco de líquido y el bulto central. Es solo decorado: no lee más partida que
+// `grid` y DEPTH, no escribe nada que no sea suyo y no gasta Math.random —tiene
+// su propio PRNG—, así que la misma semilla sigue dando la misma partida.
+// Todo se pinta en gris y un único pase con composición "color" lo tiñe con la
+// gama activa: cambiar de gama o calentar no redibuja nada. Lo que el juego pinta
+// encima no se tiñe.
+const LAVA_RES = 96;                  // celdas del campo en el lado largo del viewport
+const LAVA_BLOBS = 7;
+const LAVA_SPEED = 0.6;               // multiplicador del reloj de la lava
+const LAVA_ALARM_BOOST = 0.8;         // con alarma 1 la lava va a ×1,8 de LAVA_SPEED; 0 lo desactiva
+const LAVA_LUM_TOP = 0.86, LAVA_LUM_BOT = 0.30;
+const LAVA_BLOB_LIFT = 0.20, LAVA_CORE_LIFT = 0.07;
+const BG_CYCLE = 90;                  // s para recorrer las 4 gamas; no depende del nivel
+const BG_KEYS = [                     // [arriba, abajo]
+  [[196,182,245],[62,44,133]],        // lavanda
+  [[181,236,247],[28,85,136]],        // laguna
+  [[190,240,215],[30,110,110]],       // menta
+  [[240,195,232],[100,50,130]],       // malva
+];
+const BG_WARM = [[255,214,150],[205,72,62]];   // ámbar → coral
+const ALARM_DEPTH0 = 4;               // profundidad a la que empieza a calentar
+const ALARM_TWEEN = 1.2;              // ~0,8 s de respuesta
+const ALARM_CURVE = 1.3, ALARM_MAX = 0.9;
+const BOWL_RES = 80, BOWL_EXT = 1.12, BOWL_FADE0 = 0.86, BOWL_FADE1 = 1.06;
+const BUMP_R = 0.45*1.12;             // en CELL: el mismo radio que la roca central de hoy
+const BUB_OUT_DENSITY = 20;           // burbujas de la zona lisa por PS²
+const BUB_IN = 14;
+// Giro de las burbujas del cuenco: una sola velocidad `flowW`, en rad/s en
+// FLOW_RHO0, que cada burbuja multiplica por (FLOW_RHO0/ρ)^FLOW_EXP —más rápido
+// hacia el centro—. Tiene inercia: el giro del tablero la empuja y, sin input,
+// vuelve poco a poco a FLOW_SPIN en el último sentido en que giró el jugador.
+const FLOW_SPIN = 0.25;               // crucero, rad/s en FLOW_RHO0
+const FLOW_RHO0 = 0.9, FLOW_EXP = 1.6;
+const FLOW_KICK = 2.5;                // rad/s de flujo por rad que gira el tablero
+const FLOW_RELAX = 0.7;               // 1/s: vuelta al crucero, ~1,4 s de inercia
+const FLOW_MAX = 1.0;                 // tope de |flowW|: girar sin parar no lo embala
+
+const TAU = Math.PI*2;
+// PRNG visual, con semilla fija: nunca Math.random, que movería la secuencia de
+// la partida y rompería las pruebas sembradas
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const vrand = mulberry32(0x5eed);
+const bgMix   = (a,b,p)=>a.map((v,i)=>v+(b[i]-v)*p);
+const bgClamp = v=>Math.max(0,Math.min(1,v));
+const bgSst   = (a,b,v)=>{ const p=bgClamp((v-a)/(b-a)); return p*p*(3-2*p); };
+const bgEase  = p=>{ p=bgClamp(p); return p<.5 ? 2*p*p : 1-Math.pow(-2*p+2,2)/2; };
+const bgRgb   = c=>`rgb(${c.map(v=>Math.round(Math.max(0,Math.min(255,v)))).join(",")})`;
+function bgCanvas(w,h){ const o=document.createElement("canvas"); o.width=Math.max(1,Math.ceil(w)); o.height=Math.max(1,Math.ceil(h)); return o; }
+
+// Estado: relojes en segundos, posiciones en fracciones o PS, nada en px. Avanza
+// en stepBg(). Solo `alarm` y `flowPrev` vuelven a 0 con reset(); los relojes,
+// las burbujas y su giro siguen de una partida a otra.
+const BLOBS = Array.from({length:LAVA_BLOBS}, ()=>({
+  x0:.15+vrand()*.7, y0:.1+vrand()*.85, ax:.12+vrand()*.2, ay:.1+vrand()*.25,
+  wx:.03+vrand()*.04, wy:.025+vrand()*.035, ph:vrand()*TAU,
+  r0:.09+vrand()*.07, ra:.02+vrand()*.03, wr:.05+vrand()*.05 }));
+// ρ en fracciones de R; `th` avanza en stepBg() con el flujo
+const bubIn = Array.from({length:BUB_IN}, ()=>({ rho:.25+vrand()*.65, th:vrand()*TAU, sz:.002+vrand()*.0055, ph:vrand()*TAU }));
+let bubOut = [];                      // {u,v}: fracción del viewport; sz y sp en PS
+let bgT = 0, lavaT = 0, alarm = 0;
+let flowW = FLOW_SPIN, flowDir = 1, flowPrev = 0;   // flowPrev: `angle` del tick anterior
+
+// Cachés que dependen de R, CELL, ox, oy y DPR: se hornean en resize(). La luz
+// viene siempre de arriba a la izquierda.
+let lavaCv, lavaCx, lavaImg, lavaGW, lavaGH, lavaCell;
+let lightsCv, bowlCv, bumpCv, bumpD;
+function bakeBg(){
+  // campo de lava: celdas cuadradas, LAVA_RES en el lado largo
+  lavaCell = Math.max(W,H,1)/LAVA_RES;
+  lavaGW = Math.max(1, Math.ceil(W/lavaCell)); lavaGH = Math.max(1, Math.ceil(H/lavaCell));
+  lavaCv = bgCanvas(lavaGW, lavaGH); lavaCx = lavaCv.getContext("2d"); lavaImg = lavaCx.createImageData(lavaGW, lavaGH);
+
+  // luces y sombras del borde del cuenco
+  lightsCv = bgCanvas(W*DPR, H*DPR); const l = lightsCv.getContext("2d"); l.scale(DPR,DPR);
+  const g = (x,y,r0,r1,stops)=>{ const q=l.createRadialGradient(x,y,r0,x,y,r1); stops.forEach(s=>q.addColorStop(s[0],s[1])); return q; };
+  const disc = (x,y,r,f)=>{ l.beginPath(); l.arc(x,y,r,0,TAU); l.fillStyle=f; l.fill(); };
+  // sombra exterior abajo a la derecha y halo exterior arriba a la izquierda
+  disc(ox+R*.05, oy+R*.08, R*1.2,  g(ox+R*.05,oy+R*.08,R*.90,R*1.20,[[0,"rgba(0,0,0,0)"],[.35,"rgba(0,0,0,.30)"],[1,"rgba(0,0,0,0)"]]));
+  disc(ox-R*.05, oy-R*.07, R*1.16, g(ox-R*.05,oy-R*.07,R*.92,R*1.16,[[0,"rgba(255,255,255,0)"],[.3,"rgba(255,255,255,.45)"],[1,"rgba(255,255,255,0)"]]));
+  // pared interior: en sombra abajo a la derecha, iluminada arriba a la izquierda
+  disc(ox, oy, R*1.02, g(ox+R*.14,oy+R*.16,R*.72,R*1.08,[[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,.38)"]]));
+  disc(ox, oy, R*1.02, g(ox-R*.12,oy-R*.14,R*.80,R*1.04,[[0,"rgba(255,255,255,0)"],[1,"rgba(255,255,255,.30)"]]));
+
+  // líquido del cuenco, BOWL_RES², que se escala a 2·R·BOWL_EXT. Sin aro: se
+  // desvanece hacia fuera y deja ver la lava.
+  bowlCv = bgCanvas(BOWL_RES, BOWL_RES); const b = bowlCv.getContext("2d"), bi = b.createImageData(BOWL_RES,BOWL_RES), d = bi.data;
+  let k = 0;
+  for (let j=0;j<BOWL_RES;j++){ const v=((j+.5)/BOWL_RES*2-1)*BOWL_EXT;
+    for (let i=0;i<BOWL_RES;i++){ const u=((i+.5)/BOWL_RES*2-1)*BOWL_EXT, rho=Math.hypot(u,v);
+      const fade = 1 - bgSst(BOWL_FADE0, BOWL_FADE1, rho);
+      d[k]=d[k+1]=d[k+2]=bgClamp(.76+.06*(1-rho))*255; d[k+3]=bgClamp((.55+.2*rho*rho)*fade)*255; k+=4; } }
+  b.putImageData(bi,0,0);
+
+  // bulto central: sombra de contacto, cuerpo, sombra interior, brillo y filete
+  const hr = CELL*BUMP_R; bumpD = Math.ceil(hr*3.2);
+  bumpCv = bgCanvas(bumpD*DPR, bumpD*DPR); const u = bumpCv.getContext("2d"); u.scale(DPR,DPR); u.translate(bumpD/2, bumpD/2);
+  const ug = (x,y,r0,x1,y1,r1,stops)=>{ const q=u.createRadialGradient(x,y,r0,x1,y1,r1); stops.forEach(s=>q.addColorStop(s[0],s[1])); return q; };
+  const ud = (x,y,r,f)=>{ u.beginPath(); u.arc(x,y,r,0,TAU); u.fillStyle=f; u.fill(); };
+  ud(hr*.22, hr*.34, hr*1.25, ug(hr*.22,hr*.34,hr*.6,hr*.22,hr*.34,hr*1.25,[[0,"rgba(0,0,0,.32)"],[1,"rgba(0,0,0,0)"]]));
+  ud(0,0,hr, ug(-hr*.35,-hr*.4,0,0,0,hr,[[0,"rgb(250,250,250)"],[.55,"rgb(212,212,212)"],[1,"rgb(160,160,160)"]]));
+  ud(0,0,hr, ug(hr*.25,hr*.3,hr*.45,hr*.25,hr*.3,hr*1.05,[[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,.22)"]]));
+  u.save(); u.translate(-hr*.34,-hr*.4); u.rotate(-.7); u.beginPath(); u.ellipse(0,0,hr*.26,hr*.14,0,0,TAU); u.fillStyle="rgba(255,255,255,.75)"; u.fill(); u.restore();
+  u.beginPath(); u.arc(0,0,hr-.5,-.2,Math.PI*.8); u.strokeStyle="rgba(0,0,0,.18)"; u.lineWidth=1; u.stroke();
+}
+// las burbujas de la zona lisa siguen la densidad por PS²: al cambiar de ventana
+// se añaden o se quitan por el final, y las que quedan no se mueven
+function syncBubOut(){
+  const n = Math.round(BUB_OUT_DENSITY * (W/PS) * (H/PS)) || 0;
+  while (bubOut.length < n) bubOut.push({ u:vrand(), v:vrand(), sz:.002+vrand()*.0055, sp:.013+vrand()*.034, ph:vrand()*TAU });
+  bubOut.length = n;
+}
+
+// Un tick del fondo, al final de updateGame(). Corre también en la fase A del
+// tutorial y tras morir; con `paused` no, y el fondo se congela con la partida.
+// Alarma: continua, según la profundidad DEPTH de la bola más exterior (4 o
+// más → 0; 1, borde ocupado → 1). Es el único aviso de muerte que hay.
+function stepBg(dt){
+  let dmin = 8;
+  for (let i=0;i<N*N;i++) if (grid[i] && grid[i].k>=0 && DEPTH[i]<dmin) dmin = DEPTH[i];
+  const alarmTarget = bgClamp((ALARM_DEPTH0 - dmin)/(ALARM_DEPTH0 - 1));
+  bgT += dt;
+  lavaT += dt*LAVA_SPEED*(1 + LAVA_ALARM_BOOST*alarm);
+  alarm += (alarmTarget - alarm)*Math.min(1, ALARM_TWEEN*dt);
+  for (const b of bubOut){ b.v -= b.sp*PS/H*dt; if (b.v < -0.02){ b.v = 1.02; b.u = vrand(); } }
+  // lo que giró el tablero en este tick, leído aquí y no de anglePrev, que tras
+  // morir deja de actualizarse
+  const d = angle - flowPrev; flowPrev = angle;
+  if (d) flowDir = Math.sign(d);
+  flowW += FLOW_KICK*d + (flowDir*FLOW_SPIN - flowW)*Math.min(1, FLOW_RELAX*dt);
+  flowW = Math.max(-FLOW_MAX, Math.min(FLOW_MAX, flowW));
+  for (const b of bubIn) b.th += flowW*Math.pow(FLOW_RHO0/b.rho, FLOW_EXP)*dt;
+}
+
+// gama activa [arriba, abajo], ya calentada hacia BG_WARM con la alarma
+function bgPalette(){
+  const u = (bgT/BG_CYCLE)%1*BG_KEYS.length, i = Math.floor(u), f = bgEase(u-i);
+  const A = BG_KEYS[i], B = BG_KEYS[(i+1)%BG_KEYS.length], w = Math.pow(alarm, ALARM_CURVE)*ALARM_MAX;
+  return [bgMix(bgMix(A[0],B[0],f),BG_WARM[0],w), bgMix(bgMix(A[1],B[1],f),BG_WARM[1],w)];
+}
+// campo de metaballs, recalculado en cada frame: es función pura de lavaT
+function drawLava(){
+  const d = lavaImg.data, rr = [];
+  for (const b of BLOBS){
+    const r = (b.r0 + b.ra*Math.sin(lavaT*b.wr + b.ph))*PS/lavaCell;
+    rr.push([(b.x0 + b.ax*Math.sin(lavaT*b.wx*TAU + b.ph))*lavaGW,
+             (b.y0 + b.ay*Math.sin(lavaT*b.wy*TAU + b.ph*1.7))*lavaGH, r*r]);
   }
+  let k = 0;
+  for (let j=0;j<lavaGH;j++){
+    const base = LAVA_LUM_TOP - (LAVA_LUM_TOP-LAVA_LUM_BOT)*j/lavaGH;
+    for (let i=0;i<lavaGW;i++){
+      let f = 0; for (let n=0;n<rr.length;n++){ const dx=i-rr[n][0], dy=j-rr[n][1]; f += rr[n][2]/(dx*dx+dy*dy+1); }
+      const v = Math.min(1, base + bgSst(.85,1.3,f)*LAVA_BLOB_LIFT + bgSst(1.3,3.2,f)*LAVA_CORE_LIFT)*255;
+      d[k]=d[k+1]=d[k+2]=v; d[k+3]=255; k+=4;
+    }
+  }
+  lavaCx.putImageData(lavaImg,0,0);
+  cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
+  cx.drawImage(lavaCv, 0, 0, lavaGW*lavaCell, lavaGH*lavaCell);
+}
+function bgRing(x,y,r,a){ cx.strokeStyle=`rgba(255,255,255,${a})`; cx.lineWidth=.8; cx.beginPath(); cx.arc(x,y,Math.max(.6,r),0,TAU); cx.stroke(); }
+function drawBg(){
+  drawLava();
+  // burbujas de la zona lisa: no se pintan dentro del cuenco
+  for (const b of bubOut){
+    const x = b.u*W + Math.sin(bgT*.8+b.ph)*PS*.013, y = b.v*H;
+    if (Math.hypot(x-ox, y-oy) < R*1.08) continue;
+    const pl = .5+.5*Math.sin(bgT*1.3+b.ph); bgRing(x, y, b.sz*PS*(1+.3*pl), .22+.33*pl);
+  }
+  cx.drawImage(lightsCv, 0, 0, W, H);
+  cx.drawImage(bowlCv, ox-R*BOWL_EXT, oy-R*BOWL_EXT, R*BOWL_EXT*2, R*BOWL_EXT*2);
+  // burbujas del cuenco: el giro con inercia de stepBg()
+  for (const b of bubIn){
+    const a = b.th;
+    const pl = .5+.5*Math.sin(bgT*1.3+b.ph);
+    bgRing(ox + Math.cos(a)*b.rho*R, oy + Math.sin(a)*b.rho*R, b.sz*PS*(1+.3*pl), .25+.35*pl);
+  }
+  // es la roca central (b.k<0): el montón ya no la pinta
+  cx.drawImage(bumpCv, ox-bumpD/2, oy-bumpD/2, bumpD, bumpD);
+  // pase de color: tiñe todo lo anterior con la gama activa
+  const [top, bot] = bgPalette(), mid = bgMix(top, bot, .5);
+  cx.save(); cx.globalCompositeOperation = "color";
+  const g = cx.createLinearGradient(0,0,0,H); g.addColorStop(0,bgRgb(top)); g.addColorStop(.5,bgRgb(mid)); g.addColorStop(1,bgRgb(bot));
+  cx.fillStyle = g; cx.fillRect(0,0,W,H); cx.restore();
+}
+
+// ─── bolas ─────────────────────────────────────────────────────────────────
+// Cristal de joya sin elementos internos: borde, cuerpo, luz interior difusa y
+// reflejos de una luz fija arriba a la izquierda. Todo se hornea en resize() a
+// DPR y por frame solo hay drawImage. La piedra es la excepción: su textura es
+// del objeto y gira con el tablero; su luz, como la del cristal, no.
+const BALL_R0K = 1.15;                // radio de horneado / radio de la bola: margen para el borde
+const TL_COLOR = .12, TL_WHITE = .06, TL_BONUS = .37;   // translucidez del cuerpo
+const CRACKS = 4;                     // grietas del aviso de piedra, que entran de una en una
+const SHADOW_A = .33, SHADOW_OFF = [.2, .38];   // alfa y desplazamiento, en radios
+const LIFT_FLY = .6;                  // altura aparente de lo que vuela: sombra mayor y más lejos
+
+// Cachés en px, rehorneadas en resize(). `d` es el lado en px CSS: se pintan a
+// escala r/rad cuando la bola sale a otro radio (pop, especial).
+let ballSpr = {}, stoneAlb, stoneSpr, stoneLt, crackL = [], crackC = [], shadowSpr;
+function ballCanvas(d){
+  const o = bgCanvas(d*DPR, d*DPR), x = o.getContext("2d");
+  x.scale(o.width/d, o.height/d); x.translate(d/2, d/2); o.d = d;
+  return [o, x];
+}
+const ballRgb = (c,a)=>`rgba(${c.map(v=>Math.round(v)).join(",")},${a===undefined ? 1 : a})`;
+function ballDisc(x, px, py, r, fill){ x.beginPath(); x.arc(px, py, r, 0, TAU); x.fillStyle = fill; x.fill(); }
+function ballGrad(x, x0, y0, r0, x1, y1, r1, stops){
+  const g = x.createRadialGradient(x0, y0, r0, x1, y1, r1);
+  for (const [o,c] of stops) g.addColorStop(o, c);
+  return g;
+}
+function bakeGlass([L, B, Dk], R0, tl, extra){
+  const [o, x] = ballCanvas(Math.ceil(2.2*R0)), a = 1 - tl, Wt = [255,255,255];
+  ballDisc(x, 0, 0, R0, ballRgb(Dk));                                       // borde
+  ballDisc(x, 0, 0, R0*.9, ballGrad(x, 0, R0*.28, 0, 0, 0, R0*.9,          // cuerpo
+    [[0, ballRgb(L, a)], [.5, ballRgb(B, Math.min(1, a+.05))], [.85, ballRgb(bgMix(B,Dk,.35))], [1, ballRgb(bgMix(B,Dk,.6))]]));
+  if (extra) extra(x, R0);
+  // luz interior: cáustica abajo a la derecha y filo interior, sin arco trazado
+  x.save(); x.beginPath(); x.arc(0, 0, R0*.9, 0, TAU); x.clip();
+  x.save(); x.translate(R0*.22, R0*.34); x.rotate(-.5); x.scale(1, .62);
+  ballDisc(x, 0, 0, R0*.58, ballGrad(x, 0, 0, 0, 0, 0, R0*.58,
+    [[0, ballRgb(bgMix(L,Wt,.35), .62)], [.45, ballRgb(L, .30)], [1, ballRgb(L, 0)]]));
+  x.restore();
+  ballDisc(x, 0, 0, R0*.9, ballGrad(x, -R0*.06, -R0*.12, R0*.70, -R0*.06, -R0*.12, R0*1.02,
+    [[0, ballRgb(B, 0)], [.55, ballRgb(bgMix(L,Wt,.2), .34)], [1, ballRgb(L, 0)]]));
+  // reflejo superior
+  x.beginPath(); x.ellipse(0, -R0*.4, R0*.6, R0*.34, 0, 0, TAU);
+  x.fillStyle = ballGrad(x, 0, -R0*.55, 0, 0, -R0*.4, R0*.6,
+    [[0, "rgba(255,255,255,.70)"], [.6, "rgba(255,255,255,.26)"], [1, "rgba(255,255,255,0)"]]);
+  x.fill(); x.restore();
+  // pico de luz y chispa
+  x.save(); x.translate(-R0*.36, -R0*.42); x.rotate(-.7);
+  x.beginPath(); x.ellipse(0, 0, R0*.2, R0*.11, 0, 0, TAU); x.fillStyle = "#fff"; x.fill(); x.restore();
+  ballDisc(x, R0*.2, -R0*.6, R0*.055, "rgba(255,255,255,.95)");
+  return o;
+}
+// perla: tornasol en lugar del trazo gris de antes
+function pearlSheen(x, R0){
+  ballDisc(x, 0, 0, R0*.9, ballGrad(x, R0*.3, -R0*.1, 0, R0*.3, -R0*.1, R0*.8,
+    [[0, "rgba(255,190,230,.28)"], [1, "rgba(160,210,255,0)"]]));
+}
+// especial: el rayo dentro. shadowBlur no sigue a la matriz: va en px del lienzo
+function boltGlyph(x, R0){
+  x.save();
+  x.shadowColor = "rgba(240,255,190,.95)"; x.shadowBlur = R0*.5*DPR;
+  x.beginPath();
+  for (const [u,v] of [[.12,-.62],[-.30,.05],[-.02,.05],[-.16,.62],[.32,-.10],[.03,-.10],[.20,-.62]]) x.lineTo(u*R0, v*R0);
+  x.closePath(); x.fillStyle = "rgba(252,255,232,.95)"; x.fill();
+  x.restore();
+}
+// textura de la piedra, sin luz: gira con el tablero. Semilla fija, así que
+// rehornear da siempre la misma piedra.
+function bakeStoneAlbedo(R0){
+  const [o, x] = ballCanvas(Math.ceil(2.2*R0)), r = mulberry32(0x57013);
+  x.save(); x.beginPath(); x.arc(0, 0, R0*.92, 0, TAU); x.clip();
+  ballDisc(x, 0, 0, R0, "#8f8a84");
+  for (let i=0;i<26;i++){                                                   // manchas
+    const a = r()*TAU, d = r()*R0*.9, s = R0*(.12 + r()*.3);
+    ballDisc(x, Math.cos(a)*d, Math.sin(a)*d, s, r()<.5 ? "rgba(255,250,240,.14)" : "rgba(40,38,45,.16)");
+  }
+  x.strokeStyle = "rgba(50,48,55,.35)"; x.lineWidth = R0*.03;              // vetas
+  for (let i=0;i<3;i++){
+    const a = r()*TAU;
+    x.beginPath(); x.moveTo(Math.cos(a)*R0*.9, Math.sin(a)*R0*.9);
+    x.quadraticCurveTo((r()-.5)*R0, (r()-.5)*R0, Math.cos(a+2+r())*R0*.9, Math.sin(a+2+r())*R0*.9);
+    x.stroke();
+  }
+  for (let i=0;i<170;i++){                                                  // granos
+    const a = r()*TAU, d = Math.sqrt(r())*R0*.92;
+    x.fillStyle = r()<.55 ? "rgba(30,30,35,.38)" : "rgba(255,255,250,.32)";
+    x.fillRect(Math.cos(a)*d, Math.sin(a)*d, .6 + r()*.9, .6 + r()*.9);
+  }
+  for (let i=0;i<7;i++){                                                    // poros
+    const a = r()*TAU, d = r()*R0*.7, s = R0*(.05 + r()*.07);
+    ballDisc(x, Math.cos(a)*d, Math.sin(a)*d, s, "rgba(35,33,38,.42)");
+  }
+  x.restore();
+  return o;
+}
+function bakeStoneLight(R0){
+  const [o, x] = ballCanvas(Math.ceil(2.2*R0));
+  x.save(); x.beginPath(); x.arc(0, 0, R0*.92, 0, TAU); x.clip();
+  ballDisc(x, 0, 0, R0, ballGrad(x, -R0*.3, -R0*.35, 0, 0, 0, R0,
+    [[0, "rgba(255,250,240,.28)"], [.5, "rgba(0,0,0,0)"], [1, "rgba(10,10,20,.45)"]]));
+  x.restore();
+  x.strokeStyle = "#3a3a40"; x.lineWidth = R0*.09;
+  x.beginPath(); x.arc(0, 0, R0*.955, 0, TAU); x.stroke();
+  return o;
+}
+// Grietas del aviso, girando con el tablero como la textura. Cada una es un
+// tronco en zigzag del borde hacia dentro, que se adelgaza, con una rama.
+// crackL[j] lleva solo la grieta j; crackC[j], de la 0 a la j: así el aviso
+// pinta las ya abiertas y la que entra con dos drawImage. Semilla fija.
+function bakeCracks(R0){
+  const r = mulberry32(0xC4AC), d = Math.ceil(2.2*R0);
+  const trace = (x, pts, w0) => {
+    for (let i=1;i<pts.length;i++){
+      x.lineWidth = w0*(1 - .6*i/pts.length);
+      x.beginPath(); x.moveTo(...pts[i-1]); x.lineTo(...pts[i]); x.stroke();
+    }
+  };
+  crackL = []; crackC = [];
+  for (let j=0;j<CRACKS;j++){
+    const [o, x] = ballCanvas(d);
+    x.beginPath(); x.arc(0, 0, R0*.92, 0, TAU); x.clip();
+    x.lineCap = x.lineJoin = "round"; x.strokeStyle = "rgba(28,25,30,.85)";
+    let a = j*TAU/CRACKS + (r()-.5)*.9, e = R0;           // repartidas alrededor
+    const pts = [[Math.cos(a)*e, Math.sin(a)*e]], reach = R0*(.15 + .3*r());
+    while (e > reach){ e -= R0*(.1 + .08*r()); a += (r()-.5)*.7; pts.push([Math.cos(a)*e, Math.sin(a)*e]); }
+    trace(x, pts, R0*.06);
+    const [u, v] = pts[1 + Math.floor(r()*(pts.length-2))], br = [[u, v]];
+    let ab = Math.atan2(v, u) + (r()<.5 ? -1 : 1)*(.6 + .4*r()), eb = Math.hypot(u, v);
+    for (let i=0;i<2;i++){ eb -= R0*(.08 + .06*r()); ab += (r()-.5)*.5; br.push([Math.cos(ab)*eb*1.08, Math.sin(ab)*eb*1.08]); }
+    trace(x, br, R0*.035);
+    crackL.push(o);
+    const [oc, xc] = ballCanvas(d);
+    if (j) xc.drawImage(crackC[j-1], -d/2, -d/2, d, d);
+    xc.drawImage(o, -d/2, -d/2, d, d);
+    crackC.push(oc);
+  }
+}
+// la piedra es el último fotograma del aviso: textura con todas las grietas
+function bakeStone(){
+  const d = stoneAlb.d, [o, x] = ballCanvas(d);
+  x.drawImage(stoneAlb, -d/2, -d/2, d, d);
+  x.drawImage(crackC[CRACKS-1], -d/2, -d/2, d, d);
+  return o;
+}
+function bakeShadow(R0){
+  const [o, x] = ballCanvas(Math.ceil(3*R0));
+  ballDisc(x, 0, 0, R0*1.15, ballGrad(x, 0, 0, R0*.55, 0, 0, R0*1.15, [[0, "rgba(0,0,0,.8)"], [1, "rgba(0,0,0,0)"]]));
+  return o;
+}
+function bakeBalls(){
+  const R0 = CELL*.45*BALL_R0K;
+  ballSpr = {};
+  JEWEL.forEach((j, k)=>{ ballSpr[k] = bakeGlass(j, R0, TL_COLOR); });
+  ballSpr[WHITE] = bakeGlass(JEWEL_WHITE, R0, TL_WHITE, pearlSheen);
+  ballSpr.bonus  = bakeGlass(JEWEL_BONUS, R0, TL_BONUS, boltGlyph);
+  stoneAlb = bakeStoneAlbedo(R0);
+  bakeCracks(R0);
+  stoneSpr = bakeStone();
+  stoneLt = bakeStoneLight(R0);
+  shadowSpr = bakeShadow(R0);
+}
+
+// Aviso de salida: dos sprites por color, horneados aquí y dibujados con dos
+// drawImage girados; por frame no hay trazos, degradados ni modos de fusión.
+// - núcleo: opaco en el primer tercio de TELE_W, pegado a la frontera: con alfa
+//   el fondo teñido le cambiaba el tono.
+// - resplandor: la transparencia va horneada. Es lo único que late con la
+//   cuenta atrás.
+// Hacia fuera los dos siguen una misma curva de cola larga, 1/(1 + (d/s)²), más
+// corta en el núcleo (TELE_FALL_CORE) que en el resplandor (TELE_FALL), que va
+// debajo entero: sin codo ni hueco entre ellos en ningún punto del latido. Con
+// smoothstep el canto caía de golpe a la altura del resplandor, o, ancho, se
+// leía como una banda gorda. Los extremos se funden igual, y el resplandor
+// rebasa un poco el arco. Nada pasa de TELE_HALO_W (ver HALO_R).
+// Color: arranca en el tono del borde de la bola, la sombra de la joya, y vira
+// hacia la base al alejarse, como el canto de la bola leído de fuera hacia
+// dentro. El viraje sale rápido y acaba lento (1 − (1 − x)²): el oscuro queda
+// en un filo contra la frontera y la base llega poco a poco. Con la base pura desde el borde, numéricamente era el color de la bola
+// pero no el que se percibe en ella, que lo marca su contorno.
+// Marco del sprite: +x apunta al centro del arco.
+const TELE_FALL_CORE = .009;  // escala de la caída del núcleo, múltiplo de PS
+const TELE_FALL      = .026;  // escala de la caída con el resplandor entero
+const TELE_RIM       = .025;  // distancia en la que el borde vira a la base, en PS
+const TELE_CORE_IN   = .1;    // fracción del aviso que tarda en aparecer el núcleo
+let teleSpr = {};             // [k] = { core, glow, x, y, w, h }, en px CSS
+function bakeTele(){
+  const s = PS*DPR, r0 = teleRadIn*DPR, hw = TELE_HALO_W*s, d0 = TELE_W*s/3;
+  const half = TELEGRAPH_ARC/2, amax = half + hw*.5/r0;
+  const x0 = Math.floor(r0*Math.cos(amax)) - 1, w = Math.ceil(r0 + hw) + 1 - x0;
+  const yh = Math.ceil((r0 + hw)*Math.sin(amax)) + 1, h = 2*yh;
+  const core = new Float32Array(w*h), glow = new Float32Array(w*h), mix = new Float32Array(w*h);
+  for (let j=0;j<h;j++){ const y = j + .5 - yh;
+    for (let i=0;i<w;i++){ const x = i + .5 + x0, dr = Math.hypot(x, y) - r0;
+      const edge = bgClamp(dr + .5);                     // borde interior nítido, a 1 px
+      if (!edge) continue;
+      const phi = Math.abs(Math.atan2(y, x)), n = j*w + i;
+      const d = Math.max(0, dr - d0)/s, cut = edge*(1 - bgSst(.55, 1, dr/hw));
+      const c = cut/(1 + (d/TELE_FALL_CORE)**2)*(1 - bgSst(half*.55, half, phi));
+      const all = cut/(1 + (d/TELE_FALL)**2)*(1 - bgSst(half*.55, amax, phi));
+      core[n] = c; glow[n] = all; mix[n] = 1 - (1 - Math.min(1, Math.max(0, dr)/s/TELE_RIM))**2;
+    }
+  }
+  const paint = (a, [, B, Dk])=>{
+    const o = bgCanvas(w, h), x = o.getContext("2d"), im = x.createImageData(w, h), d = im.data;
+    for (let n=0;n<w*h;n++){ const m = mix[n];
+      d[4*n] = Dk[0] + (B[0]-Dk[0])*m; d[4*n+1] = Dk[1] + (B[1]-Dk[1])*m; d[4*n+2] = Dk[2] + (B[2]-Dk[2])*m;
+      d[4*n+3] = Math.round(a[n]*255); }
+    x.putImageData(im, 0, 0);
+    return o;
+  };
+  const spr = J => ({ core:paint(core, J), glow:paint(glow, J), x:x0/DPR, y:-yh/DPR, w:w/DPR, h:h/DPR });
+  teleSpr = {};
+  JEWEL.forEach((J, k)=>{ teleSpr[k] = spr(J); });
+  teleSpr[WHITE] = spr(JEWEL_WHITE);
+}
+// El aviso no se apaga al salir la ficha: aguanta TELE_HOLD encendido mientras
+// ella crece (BORN_T) y se funde en TELE_FADE, para que los dos convivan.
+const TELE_HOLD = .2, TELE_FADE = .3;
+function drawTele(k, aArc, glowA, coreA){
+  const sp = teleSpr[k];
+  cx.save();
+  cx.translate(ox, oy); cx.rotate(aArc);
+  cx.globalAlpha = glowA; cx.drawImage(sp.glow, sp.x, sp.y, sp.w, sp.h);
+  cx.globalAlpha = coreA; cx.drawImage(sp.core, sp.x, sp.y, sp.w, sp.h);
+  cx.restore();
+}
+// La ficha nace a su tamaño lógico —el vuelo y los choques no cambian—, pero se
+// dibuja creciendo desde BORN_G0 con un leve rebote, para no salir de la nada.
+const BORN_T = .22, BORN_G0 = .3, BORN_BACK = 1.2;
+function bornScale(b, tv){
+  const u = Math.max(0, Math.min(1, (tv - b.born)/BORN_T)) - 1;
+  return BORN_G0 + (1 - BORN_G0)*(1 + (BORN_BACK + 1)*u*u*u + BORN_BACK*u*u);
+}
+
+// sprite centrado en (x,y) a escala s; con `rot`, girado sobre su centro
+function sprite(o, x, y, s, rot){
+  const d = o.d*s;
+  if (rot){ cx.save(); cx.translate(x, y); cx.rotate(rot); cx.drawImage(o, -d/2, -d/2, d, d); cx.restore(); }
+  else cx.drawImage(o, x - d/2, y - d/2, d, d);
+}
+// una bola de tipo k a radio r. La piedra lleva el giro del tablero en la
+// textura; la luz, nunca.
+function drawBall(k, x, y, r){
+  const s = r/(CELL*.45);
+  if (k === STONE){ sprite(stoneSpr, x, y, s, angleDraw); sprite(stoneLt, x, y, s); }
+  else sprite(ballSpr[k], x, y, s);
+}
+// Aviso de piedra, sobre la bola entera: las grietas entran de una en una (todas
+// abiertas a p = .8) y la piedra la cubre por igual con alfa p³, que es mezclar
+// el color hacia su gris sin cambiarle el tono. Con p³ los dos colores más
+// parecidos siguen a ΔE ≥ 18 a 3,5 s de petrificarse (con la costra radial de
+// antes, a 1). En p = 1 es exactamente la piedra de drawBall(): no hay salto.
+// Como mucho cuatro drawImage, sin máscaras ni gradientes por frame.
+function drawStoneWarn(age, x, y, r){
+  const p = Math.max(0, Math.min(1, (age-STONE_WARN)/(STONE_TIME-STONE_WARN)));
+  const s = r/(CELL*.45), m = p*p*p, n = p*CRACKS*1.25, i = Math.min(CRACKS, Math.floor(n));
+  cx.globalAlpha = m; sprite(stoneAlb, x, y, s, angleDraw);
+  cx.globalAlpha = 1; if (i) sprite(crackC[i-1], x, y, s, angleDraw);
+  if (i < CRACKS){ cx.globalAlpha = n - i; sprite(crackL[i], x, y, s, angleDraw); }
+  cx.globalAlpha = m; sprite(stoneLt, x, y, s);
   cx.globalAlpha = 1;
 }
+function drawShadow(x, y, r, lift){
+  const s = r/(CELL*.45)*(1 + .2*lift), o = 1 + 1.5*lift;
+  sprite(shadowSpr, x + r*SHADOW_OFF[0]*o, y + r*SHADOW_OFF[1]*o, s);
+}
+
+// ─── estela de burbujas ────────────────────────────────────────────────────
+// Lo que distingue el hard drop: más burbujas y más gordas, sin aro ni trazo.
+// Solo decorado, en el mundo y en PS como las bolas en vuelo. Nace y avanza en
+// updateGame() con su PRNG `prand` —ni Math.random ni vrand ni rrand—, así que la
+// partida es la misma con o sin ella.
+const BUB_TRAIL_N = 1, BUB_TRAIL_HARD = 5;   // por tick y bola en vuelo
+const BUB_TRAIL_MAX = 240;                   // vivas; sobran las más viejas
+const prand = mulberry32(0xb0b1e);
+let trailBubs = [];
+// tras stepFlying(): la velocidad sale del avance del tick, así que vale igual
+// para radiales, sinusoides y la espiral de la especial
+function emitTrail(dt){
+  const rad = CELL_PS*.45;
+  for (const b of flying){
+    const vx = (b.x - b.px)/dt, vy = (b.y - b.py)/dt;
+    const n = b.hard ? BUB_TRAIL_HARD : BUB_TRAIL_N;
+    const L = b.bonus ? RING_G : (b.k===WHITE ? JEWEL_WHITE : JEWEL[b.k])[0];
+    for (let i=0;i<n;i++){
+      const kv = .05 + prand()*.1;
+      trailBubs.push({
+        x: b.x + (prand()-.5)*rad, y: b.y + (prand()-.5)*rad,
+        vx: -vx*kv + (prand()-.5)*.05, vy: -vy*kv + (prand()-.5)*.05,
+        r: b.hard ? .006 + prand()*.012 : .004 + prand()*.008,
+        life: .45 + prand()*.45, age: 0,
+        tint: prand() < .35 ? bgMix(L, [255,255,255], .3).map(Math.round).join(",") : null });
+    }
+  }
+  if (trailBubs.length > BUB_TRAIL_MAX) trailBubs.splice(0, trailBubs.length - BUB_TRAIL_MAX);
+}
+function stepTrail(dt){
+  for (const p of trailBubs){ p.age += dt; p.x += p.vx*dt; p.y += p.vy*dt; p.vx *= .96; p.vy *= .96; }
+  trailBubs = trailBubs.filter(p => p.age < p.life);
+}
+function drawTrail(){
+  cx.lineWidth = .9;
+  for (const p of trailBubs){
+    const k = 1 - p.age/p.life, [x,y] = toScreen(p.x, p.y);
+    const r = Math.max(.6, p.r*PS*(.6 + .8*(1-k)));
+    cx.strokeStyle = p.tint ? `rgba(${p.tint},${.7*k})` : `rgba(255,255,255,${.75*k})`;
+    cx.beginPath(); cx.arc(x, y, r, 0, TAU); cx.stroke();
+    if (r > 2){
+      cx.fillStyle = `rgba(255,255,255,${.8*k})`;
+      cx.beginPath(); cx.arc(x - r*.35, y - r*.35, r*.22, 0, TAU); cx.fill();
+    }
+  }
+}
+
+// ─── dibujo ────────────────────────────────────────────────────────────────
 
 // Anillo de carga. Por fuera no cabía a lo ancho: R*1.25 = PS*0.575 contra un
 // medio ancho de PS*0.5 en portrait, con el anclaje de las 9 fuera de pantalla.
-// Va por dentro de la frontera, más fino que ella y a unos píxeles, de forma que
-// el aro entero es visible en cualquier viewport. Contrapartida asumida: con el
-// montón crecido las fichas exteriores lo tapan — se dibuja debajo de ellas.
-// No pulsa: es progreso, no alarma.
-function drawGauge(){
-  if (!gaugeOn()) return;   // sin carga disponible el anillo no existe: ni pista ni relleno
-  cx.save();
-  cx.lineCap = "butt";                 // corte recto: el arco acaba en radio, no en punta
-  cx.lineWidth = PS*GAUGE_W;
-  cx.strokeStyle = GAUGE_TRACK;
-  cx.beginPath(); cx.arc(ox,oy,gaugeRad,0,7); cx.stroke();
+// Va por dentro de la frontera, a unos píxeles, de forma que el aro entero es
+// visible en cualquier viewport. Contrapartida asumida: con el montón crecido las
+// fichas exteriores lo tapan — se dibuja debajo de ellas.
+// Se pinta como un rayo lima, el color de la bola especial que suelta: un tubo
+// de plasma con tres hebras quebradas que saltan a golpes, arcos que salen del
+// tubo y vuelven a él, descargas periódicas y una punta de plasma en el extremo
+// de la carga. Sin pista: lo no cargado no
+// tiene trazo. Es solo dibujo: de la partida lee gaugeV y gaugeFlashT, y tiene su
+// reloj `ringT` y su PRNG `rrand` —ni Math.random ni vrand—, así que no mueve ni
+// la partida ni las burbujas. Calibración aprobada en el prototipo: verde 10%,
+// energía 10%, velocidad 50%, separación de arcos 30%.
+const RING_SPEED   = 0.5;           // escala todo el tiempo del rayo
+const ENERGY       = 0.10;
+const ENERGY_K     = 0.44;          // = .35 + .9·ENERGY
+const BOLT_AMP     = 0.0134;        // desvío de las hebras, en PS: = .012 + .014·ENERGY
+const BOLT_STEP    = 0.35;          // rad de arco entre puntos base de una hebra
+const ARC_H        = 0.0176;        // altura de los arcos, en PS: = .008 + .032·separación
+const REGEN_MIN = 0.05, REGEN_VAR = 0.07;    // vida de cada forma, en s de ringT
+const STRIKE_MIN = 0.70, STRIKE_VAR = 1.50;  // entre descargas, en s de ringT
+const STRIKE_DECAY = 4.5;           // por s de ringT
+const RING_G = [176,255,34], RING_GLO = [222,255,160], RING_CORE = [250,255,228], RING_GD = [70,120,0];
+const rrand = mulberry32(0xb017);
 
+// Cada punto es [u, d]: u ∈ [0,1] a lo largo del arco cargado y d el desvío
+// radial en PS. Al crecer o vaciarse el arco las formas se estiran sin
+// regenerarse; solo cambian al vencer su temporizador. `ringT` no vuelve a 0 con
+// reset(), como los relojes del fondo.
+let ringT = 0;
+const ring = { strike:0, nextStrike:0, tipNext:0, tipArcs:[],
+  strands:[1.25, 0.8, 0.55].map(w=>({ next:0, int:1, w, pts:null, arcs:[] })) };
+
+// un tick del rayo, junto al del fondo: con `paused` no corre y el rayo se congela
+function stepRing(dt){
+  ringT += dt*RING_SPEED;
+  ring.strike = Math.max(0, ring.strike - dt*RING_SPEED*STRIKE_DECAY);
+  if (ringT >= ring.nextStrike){ ring.strike = 1; ring.nextStrike = ringT + STRIKE_MIN + rrand()*STRIKE_VAR; }
+}
+
+// desplazamiento de punto medio: en cada pasada un punto nuevo por segmento, con
+// u movido ±17,5% del segmento y d ± el desvío, que se multiplica por .55
+function ringJag(P, dev, passes){
+  for (let n=0;n<passes;n++){
+    const Q = [P[0]];
+    for (let i=1;i<P.length;i++){
+      const a = P[i-1], b = P[i];
+      Q.push([(a[0]+b[0])/2 + (rrand()-.5)*(b[0]-a[0])*.35, (a[1]+b[1])/2 + (rrand()-.5)*2*dev]);
+      Q.push(b);
+    }
+    P = Q; dev *= .55;
+  }
+  return P;
+}
+// arco que nace y muere en el tubo, entre u0 y u1, con altura h en PS (+ fuera)
+function ringArch(u0, u1, h){
+  const P = [];
+  for (let i=0;i<=6;i++){ const q = i/6; P.push([u0+(u1-u0)*q, h*Math.sin(Math.PI*q)]); }
+  return ringJag(P, Math.abs(h)*.18, 2);
+}
+// rehace la hebra i y sus arcos para un arco cargado de L rad
+function ringStrand(s, i, L){
+  s.next = ringT + REGEN_MIN + rrand()*REGEN_VAR;
+  s.int = .6 + .4*rrand();
+  const amp = BOLT_AMP*s.w*(1 + .6*ring.strike);
+  const n = Math.max(2, Math.ceil(L/BOLT_STEP)), P = [];
+  for (let j=0;j<=n;j++) P.push([j/n, (j===0 || j===n) ? 0 : (rrand()-.5)*2*amp]);
+  s.pts = ringJag(P, .55*amp, 3);
+  s.arcs = [];
+  const na = Math.round((i===0 ? 1.5 : 0.8)*(.6 + 1.6*ENERGY)*(1 + ring.strike));
+  for (let f=0;f<na;f++){
+    const span = .12 + rrand()*.38, a0 = rrand()*Math.max(.01, L-span), a1 = Math.min(L, a0+span);
+    const h = (rrand()<.6 ? 1 : -1)*ARC_H*(.5 + .5*rrand())*(1 + .4*ring.strike)*Math.min(1, span/.25 + .4);
+    s.arcs.push(ringArch(a0/L, a1/L, h));
+  }
+}
+function ringTips(L){
+  ring.tipNext = ringT + REGEN_MIN + rrand()*REGEN_VAR;
+  ring.tipArcs = [];
+  for (let i=0;i<2;i++){
+    const span = .08 + rrand()*.12, h = (rrand()<.5 ? 1 : -1)*ARC_H*(.5 + .4*rrand());
+    ring.tipArcs.push(ringArch(Math.max(0, 1 - span/L), 1, h));
+  }
+}
+
+// trazado: una forma [u,d] del arco cargado hasta a1, o un arco del tubo
+function ringPath(P, a1){
+  const L = a1 - GAUGE_A0;
+  cx.beginPath();
+  for (const [u,d] of P){ const a = GAUGE_A0 + u*L, r = gaugeRad + d*PS; cx.lineTo(ox + Math.cos(a)*r, oy + Math.sin(a)*r); }
+}
+function ringArc(a0, a1){ cx.beginPath(); cx.arc(ox, oy, gaugeRad, a0, a1); }
+// repasa el trazado vigente: grosor en PS; op "lighter" (+), "multiply" (×) o normal
+function ringStroke(lw, col, a, op){
+  cx.globalCompositeOperation = op || "source-over";
+  cx.lineWidth = PS*lw;
+  cx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${Math.min(1,a)})`;
+  cx.stroke();
+}
+function ringGlow(x, y, r, stops){
+  const g = cx.createRadialGradient(x, y, 0, x, y, r);
+  for (const [o,c,a] of stops) g.addColorStop(o, `rgba(${c[0]},${c[1]},${c[2]},${a})`);
+  cx.globalCompositeOperation = "source-over";
+  cx.fillStyle = g; cx.beginPath(); cx.arc(x, y, r, 0, TAU); cx.fill();
+}
+// Halo del arco cargado, sin escalones: tres trazos concéntricos de ancho fijo
+// sumaban bandas de borde duro. Es un degradado radial continuo, con perfil
+// 1 − smoothstep hasta HALO_H del tubo, sobre el sector cargado, más un remate
+// redondo del mismo perfil en cada extremo. Sector y remates se reparten el plano
+// en cuñas desde el centro —cada remate, su mitad del hueco—, así que nada se
+// suma dos veces, tampoco con el anillo casi cerrado.
+const HALO_H = 0.08;                  // semiancho del halo, en PS
+function ringHalo(a1, peak){
+  const h = PS*HALO_H, G = RING_G, stops = [];
+  for (let i=0;i<=8;i++){ const x = i/8; stops.push([x, `rgba(${G[0]},${G[1]},${G[2]},${peak*(1 - x*x*(3 - 2*x))})`]); }
+  cx.globalCompositeOperation = "lighter";
+  let g = cx.createRadialGradient(ox, oy, gaugeRad - h, ox, oy, gaugeRad + h);
+  for (const [x,c] of stops){ g.addColorStop(.5 - x/2, c); g.addColorStop(.5 + x/2, c); }
+  cx.fillStyle = g;
+  cx.beginPath(); cx.arc(ox, oy, gaugeRad + h, GAUGE_A0, a1); cx.arc(ox, oy, gaugeRad - h, a1, GAUGE_A0, true); cx.fill();
+  const mid = (a1 + GAUGE_A0 + TAU)/2;
+  for (const [a, w0, w1] of [[a1, a1, mid], [GAUGE_A0, mid, GAUGE_A0 + TAU]]){
+    const x = ox + Math.cos(a)*gaugeRad, y = oy + Math.sin(a)*gaugeRad;
+    g = cx.createRadialGradient(x, y, 0, x, y, h);
+    for (const [s,c] of stops) g.addColorStop(s, c);
+    cx.save();
+    cx.beginPath(); cx.moveTo(ox, oy); cx.arc(ox, oy, gaugeRad + 2*h, w0, w1); cx.clip();
+    cx.fillStyle = g; cx.beginPath(); cx.arc(x, y, h, 0, TAU); cx.fill();
+    cx.restore();
+  }
+}
+
+// No pulsa: es progreso, no alarma. Las descargas son textura del rayo, no avisan
+// de nada.
+function drawGauge(){
+  if (!gaugeOn()) return;   // sin carga disponible el anillo no existe
+  const G = RING_G, GLO = RING_GLO, CORE = RING_CORE, FLARE = [228,255,170];
+  const st = ring.strike, K = ENERGY_K*(1 + .9*st), K1 = Math.min(1, K);
+  cx.save();
+  cx.lineCap = cx.lineJoin = "round";
   const p = Math.max(0, Math.min(1, gaugeV/GAUGE_MAX));
   if (p > 0.002){
     // horario desde las 9: pasa por arriba y cierra en el punto de partida
-    cx.strokeStyle = BOMB_FILL;
-    cx.beginPath(); cx.arc(ox,oy,gaugeRad,GAUGE_A0,GAUGE_A0+p*Math.PI*2); cx.stroke();
+    const a1 = GAUGE_A0 + p*TAU, L = a1 - GAUGE_A0;
+    // halo y tubo
+    ringHalo(a1, .213*K);
+    ringArc(GAUGE_A0, a1);
+    ringStroke(.018, G,   .495*K, "lighter");
+    ringStroke(.006, GLO, .45*K,  "lighter");
+    ringStroke(.022, [150,235,170], .055, "multiply");
+    ringStroke(.016, G,   .06*K1);
+    ringStroke(.005, GLO, .055*K1);
+    // hebras, cada una con sus arcos
+    ring.strands.forEach((s, i)=>{
+      if (!s.pts || ringT >= s.next) ringStrand(s, i, L);
+      const k = s.int*K, k1 = Math.min(1, k), w = s.w;
+      ringPath(s.pts, a1);
+      ringStroke(.0298*w, G, .268*k, "lighter");
+      ringStroke(.011*w,  G, .81*k,  "lighter");
+      ringStroke(.011*w,  RING_GD, .055*k1);
+      ringStroke(.008*w,  G,    .095*k1);
+      ringStroke(.0044*w, CORE, .995*k1);
+      for (const f of s.arcs){
+        ringPath(f, a1);
+        ringStroke(.0158, G, .212*k, "lighter");
+        ringStroke(.006,  G, .63*k,  "lighter");
+        ringStroke(.0055, G,    .085*k1);
+        ringStroke(.0024, CORE, .92*k1);
+      }
+    });
+    // descarga
+    if (st > .05){ ringArc(GAUGE_A0, a1); ringStroke(.05, FLARE, .337*st, "lighter"); }
+    // punta
+    const tx = ox + Math.cos(a1)*gaugeRad, ty = oy + Math.sin(a1)*gaugeRad;
+    const pr = PS*(.0495 + .02*st)*(.9 + .1*Math.sin(ringT*23));
+    ringGlow(tx, ty, 1.8*pr, [[0,CORE,.905], [.3,GLO,.75], [1,G,0]]);
+    ringGlow(tx, ty, .6*pr, [[0,CORE,.1], [1,G,0]]);
+    if (ringT >= ring.tipNext) ringTips(L);
+    for (const f of ring.tipArcs){
+      ringPath(f, a1);
+      ringStroke(.012,  G, .27, "lighter");
+      ringStroke(.005,  G,    .085);
+      ringStroke(.0025, CORE, .92);
+    }
+    // ancla: con el contador vacío no se pinta nada
+    ringGlow(ox - gaugeRad, oy, PS*.024, [[0,GLO,.9], [1,G,0]]);
   }
-  if (gaugeFlashT > 0){
-    cx.globalAlpha = gaugeFlashT/GAUGE_FLASH;
-    cx.lineWidth = PS*GAUGE_W*2.2;
-    cx.strokeStyle = "#ffffff";
-    cx.beginPath(); cx.arc(ox,oy,gaugeRad,0,7); cx.stroke();
-  }
+  // cierre: descarga sobre la circunferencia completa
+  if (gaugeFlashT > 0){ ringArc(0, TAU); ringStroke(.05, FLARE, .54*gaugeFlashT/GAUGE_FLASH, "lighter"); }
   cx.restore();
 }
 
@@ -2230,172 +3047,117 @@ function drawGauge(){
 // pasos de 60 Hz. No modifica nada de la partida.
 function draw(alpha){
   angleDraw = lerp(angleD0, angle, alpha);
+  const tv = t - (1 - alpha)*SIM_DT;   // reloj del dibujo, entre los dos ticks
   // la matriz px CSS → buffer se repone en cada frame, no solo en resize(): el
   // navegador puede tirar el contexto de una pestaña que lleva rato en segundo
   // plano y devolverlo con el estado a cero, sin resize. Con la matriz identidad
   // todo salía a escala 1/DPR, encogido en la esquina superior izquierda, hasta
   // el siguiente resize. Es asignar seis números: no cuesta nada.
   cx.setTransform(DPR,0,0,DPR,0,0);
-  // el degradado se estira hasta la esquina más lejana: en horizontal es lo
-  // que llena los laterales, en vertical apenas cambia.
-  const gR = Math.max(PS*0.85, Math.hypot(W,H)/2);
-  const g = cx.createRadialGradient(ox,oy,PS*0.05,ox,oy,gR);
-  g.addColorStop(0,"#141a34"); g.addColorStop(1,"#05050c");
-  cx.fillStyle=g; cx.fillRect(0,0,W,H);
+  drawBg();
 
-  // frontera. El aviso no es un umbral calibrado sino un hecho: late si hay
-  // alguna celda de profundidad 1 —de borde— ocupada, que es literalmente la
-  // condición de muerte con una bola de margen. Es global, no direccional: dice
-  // "estás en peligro", no "aquí"; el jugador ya está mirando el montón.
-  // Lo único calibrable: si el rojo entra tarde en los niveles altos, el
-  // disparador pasa de 1 a 2 —dos bolas de margen— y no se toca nada más.
-  let danger = false;
-  for (let i=0;i<N*N;i++) if (grid[i] && DEPTH[i]===1){ danger = true; break; }
-  cx.beginPath(); cx.arc(ox,oy,R,0,7);
-  cx.lineWidth = PS*BORDER_W;
-  if (danger){
-    cx.save();
-    cx.globalAlpha = 0.55+0.45*Math.abs(Math.sin(t*7));
-    cx.strokeStyle = DANGER; cx.stroke();
-    cx.restore();
-  } else {
-    cx.strokeStyle = "rgba(120,110,230,.75)"; cx.stroke();
-  }
-
+  // la frontera no se traza: el borde del cuenco del fondo ya dibuja el límite, y
+  // el peligro lo cuenta la alarma del fondo (ver stepBg()). Hubo además un aro
+  // rojo que latía con el borde ocupado; sobraba y se quitó.
   drawGauge();
 
-  // aviso de la próxima ficha: arco de 35° fuera del círculo, en su color
-  // en la fase A del tutorial no hay cuenta: nada que anunciar todavía
+  // aviso de la próxima ficha: arco de 35° fuera del círculo, en su color (ver
+  // bakeTele()). En la fase A del tutorial no hay cuenta: nada que anunciar todavía
+  // El latido va solo en el resplandor; el núcleo, tras asomar, es opaco.
+  const beat = 0.75+0.25*Math.sin(t*11);
+  if (!dead && teleOut){
+    const f = 1 - Math.max(0, tv - teleOut.at - TELE_HOLD)/TELE_FADE;
+    if (f > 0) drawTele(teleOut.k, teleOut.aArc, f*(0.35 + 0.65*beat), Math.min(1, f));
+  }
   if (!dead && nextSpawn && spawnT < TELEGRAPH && ctrlPhase !== "A"){
     const p = 1 - Math.max(0,spawnT)/TELEGRAPH;        // 0 → 1 al acercarse
-    const col = nextSpawn.k===WHITE ? PAINT[WHITE] : COL[nextSpawn.k];
-    const a0 = nextSpawn.aArc - TELEGRAPH_ARC/2, a1 = nextSpawn.aArc + TELEGRAPH_ARC/2;
-    const pulse = 0.35 + 0.65*p*(0.75+0.25*Math.sin(t*11));
-    // engorda al acercarse, pero creciendo hacia FUERA desde un borde interior
-    // fijo: el aire contra la frontera se mantiene en RING_GAP durante todo el
-    // latido en vez de abrirse y cerrarse con él.
-    const lw = PS*TELE_W*(0.6+0.4*p);
-
-    cx.save();
-    cx.lineCap = "butt";                 // corte recto, mismo remate que el gauge
-    // halo ancho y difuso: es resplandor, queda deliberadamente fuera de la
-    // progresión de grosores, pero arranca del MISMO borde interior que el trazo
-    // y crece solo hacia fuera, para no comerse el aire contra la frontera.
-    cx.globalAlpha = 0.16*pulse;
-    cx.beginPath(); cx.arc(ox,oy,teleRadIn + PS*TELE_HALO_W/2,a0,a1);
-    cx.lineWidth = PS*TELE_HALO_W; cx.strokeStyle = col; cx.stroke();
-    // trazo nítido
-    cx.globalAlpha = 0.85*pulse;
-    cx.beginPath(); cx.arc(ox,oy,teleRadIn + lw/2,a0,a1);
-    cx.lineWidth = lw; cx.strokeStyle = col; cx.stroke();
-    cx.restore();
+    drawTele(nextSpawn.k, nextSpawn.aArc, 0.35 + 0.65*p*beat, Math.min(1, p/TELE_CORE_IN));
   }
 
   const rad = CELL*0.45;
+  // Lo que vuela se interpola entre el tick anterior y el actual; la muestra se
+  // toma una vez y la usan la sombra y la bola.
+  const fly = flying.map(b => toScreen(
+    b.dx0 === undefined ? b.x : lerp(b.dx0, b.x, alpha),
+    b.dy0 === undefined ? b.y : lerp(b.dy0, b.y, alpha)));
+  // Sombras en un pase previo, todas debajo de todas las bolas: pintadas con
+  // cada bola oscurecían a sus vecinas. La del pop crece con ella.
+  cx.globalAlpha = SHADOW_A;
   for (let r=0;r<N;r++) for (let c=0;c<N;c++){
-    const b = grid[idx(c,r)]; if (!b) continue;
+    const b = grid[idx(c,r)]; if (!b || b.k<0) continue;   // el bulto del fondo ya lleva la suya
+    const [x,y] = cellToScreen(b.vc===undefined?c:b.vc, b.vr===undefined?r:b.vr);
+    drawShadow(x, y, flashT>0 && flashSet.has(idx(c,r)) ? popR(rad) : rad, 0);
+  }
+  if (deadBall){ const [x,y] = cellToScreen(deadBall.vc, deadBall.vr); drawShadow(x, y, rad, 0); }
+  if (outBall){
+    const [x,y] = cellToScreen(outBall.vc, outBall.vr);
+    drawShadow(x, y, flashT>0 && flashSet.has(OUT) ? popR(rad) : rad, 0);
+  }
+  const born = flying.map(b => bornScale(b, tv));
+  flying.forEach((b, i) => drawShadow(fly[i][0], fly[i][1], (b.bonus ? rad*1.05 : rad)*born[i], LIFT_FLY));
+  cx.globalAlpha = 1;
+
+  drawTrail();
+
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    const b = grid[idx(c,r)]; if (!b || b.k<0) continue;   // la roca central es el bulto del fondo
     const vc = b.vc===undefined?c:b.vc, vr = b.vr===undefined?r:b.vr;
     const [x,y] = cellToScreen(vc,vr);
-    if (b.k<0){ bubble(x,y,"#0a0a10",rad*1.12,false);
-                cx.beginPath(); cx.arc(x,y,rad*1.12,0,7);
-                cx.strokeStyle="rgba(150,150,190,.35)"; cx.lineWidth=1.5; cx.stroke(); }
-    else {
-      const fl = flashT>0 && flashSet.has(idx(c,r));
-      let fill = b.k===WHITE ? PAINT[WHITE] : (b.k===STONE ? PAINT[STONE] : COL[b.k]);
-      let rr = rad;
-      if (fl) [fill, rr] = popFx(x, y, fill, rad);
-      bubble(x,y,fill,rr, !fl && b.k!==STONE);
-      if (b.k===WHITE && !fl){
-        cx.beginPath(); cx.arc(x,y,rad,0,7);
-        cx.strokeStyle="rgba(120,120,140,.7)"; cx.lineWidth=1.5; cx.stroke();
-      }
-      if (level >= 2 && !fl && b.k!==WHITE && b.k!==STONE && b.age > STONE_WARN){
-        // aviso: anillo gris que engorda. Empieza lento y discreto, y solo
-        // acelera al acercarse la petrificación: urgencia, no ansiedad constante.
-        // El nivel 1 lo esconde aunque la edad ya corra: nada se muestra antes
-        // de su nivel, y el aviso es justo lo que el tip del nivel 2 nombra.
-        const p = (b.age-STONE_WARN)/(STONE_TIME-STONE_WARN);
-        const freq  = 1.8 + 11*p*p;
-        const pulse = (0.30 + 0.55*p) * (0.62 + 0.38*Math.abs(Math.sin(b.age*freq)));
-        cx.globalAlpha = pulse;
-        cx.beginPath(); cx.arc(x,y,rad*0.99,0,7);
-        cx.strokeStyle = PAINT[STONE];
-        cx.lineWidth = rad*(0.08+0.46*p*p);
-        cx.stroke();
-        cx.globalAlpha = 1;
-      }
-    }
+    if (flashT>0 && flashSet.has(idx(c,r))){ popFx(b.k, x, y, rad); continue; }
+    drawBall(b.k, x, y, rad);
+    // Aviso: la bola se va volviendo piedra. Entra con una grieta y se agrisa al
+    // acercarse la petrificación; tras un match de 2 se ve desandar (`rew`). El
+    // nivel 1 lo esconde aunque la edad ya corra: nada se muestra antes de su
+    // nivel, y el aviso es justo lo que el tip del nivel 2 nombra.
+    const va = Math.max(b.age, b.rew || 0);
+    if (level >= 2 && b.k!==WHITE && b.k!==STONE && va > STONE_WARN) drawStoneWarn(va, x, y, rad);
   }
 
   // la causante del game over, en coordenadas de grid como las del montón:
   // gira con el tablero y no se mueve más, porque con `dead` nada avanza.
   if (deadBall){
     const [x,y] = cellToScreen(deadBall.vc, deadBall.vr);
-    bubble(x,y, deadBall.k===WHITE?PAINT[WHITE]:COL[deadBall.k], rad, true);
+    drawBall(deadBall.k, x, y, rad);
   }
   // la que espera fuera del campo, igual: en su celda de snap, girando con el tablero
   if (outBall){
     const [x,y] = cellToScreen(outBall.vc, outBall.vr);
-    const fl = flashT>0 && flashSet.has(OUT);
-    let fill = outBall.k===WHITE ? PAINT[WHITE] : COL[outBall.k], rr = rad;
-    if (fl) [fill, rr] = popFx(x, y, fill, rad);
-    bubble(x,y, fill, rr, !fl);
+    if (flashT>0 && flashSet.has(OUT)) popFx(outBall.k, x, y, rad);
+    else drawBall(outBall.k, x, y, rad);
   }
 
-  // el vuelo vive en el mundo; aquí, y solo aquí, pasa a pantalla. La última
-  // muestra de la estela es la posición del tick actual, así que se cambia por la
-  // interpolada: la cabeza va pegada a la bola.
-  const trailPath = (tr, hx, hy) => {
-    cx.beginPath();
-    for (let i=0;i<tr.length;i++){
-      const last = i === tr.length-1;
-      const [tx,ty]=toScreen(last ? hx : tr[i][0], last ? hy : tr[i][1]);
-      i?cx.lineTo(tx,ty):cx.moveTo(tx,ty);
-    }
-  };
-  for (const b of flying){
-    const bx = b.dx0 === undefined ? b.x : lerp(b.dx0, b.x, alpha);
-    const by = b.dy0 === undefined ? b.y : lerp(b.dy0, b.y, alpha);
-    const [x,y] = toScreen(bx, by);
-    if (b.bonus){
-      const col = BOMB_COL;
-      trailPath(b.trail, bx, by);
-      cx.strokeStyle=rgba(col,0.45); cx.lineWidth=rad*0.5; cx.stroke();
-      const pu = 1+0.18*Math.sin(t*18);
-      bubble(x,y,col,rad*1.05*pu,true);
-    } else {
-      if (b.hard){
-        trailPath(b.trail, bx, by);
-        cx.strokeStyle="rgba(255,255,255,.30)"; cx.lineWidth=rad*0.9; cx.lineCap="round";
-        cx.stroke();
-      }
-      bubble(x,y, b.k===WHITE?PAINT[WHITE]:COL[b.k], rad, true);
-      if (b.hard){
-        cx.beginPath(); cx.arc(x,y,rad*1.45,0,7);
-        cx.strokeStyle="rgba(255,255,255,.55)"; cx.lineWidth=rad*0.16; cx.stroke();
-      }
-    }
-  }
+  // el vuelo vive en el mundo; aquí, y solo aquí, pasa a pantalla. El hard drop
+  // no tiene dibujo propio: lo distingue su estela de burbujas.
+  flying.forEach((b, i) => {
+    const [x,y] = fly[i], g = born[i], rad = CELL*.45*g;
+    if (!b.bonus){ drawBall(b.k, x, y, rad); return; }
+    // la especial no late de tamaño: late su halo, debajo, y un núcleo encima
+    const G = RING_G, C0 = RING_CORE;
+    cx.save(); cx.globalCompositeOperation = "lighter";
+    ballDisc(cx, x, y, rad*2, ballGrad(cx, x, y, 0, x, y, rad*2, [[0, ballRgb(G, .28 + .14*Math.sin(t*6))], [1, ballRgb(G, 0)]]));
+    cx.restore();
+    sprite(ballSpr.bonus, x, y, 1.05*g);
+    cx.save(); cx.globalCompositeOperation = "lighter";
+    ballDisc(cx, x, y, rad*.55, ballGrad(cx, x, y, 0, x, y, rad*.55, [[0, ballRgb(C0, .22 + .22*Math.sin(t*9))], [1, ballRgb(C0, 0)]]));
+    cx.restore();
+  });
   drawFloaters();
 }
-// fundido rápido a blanco + ligero crecimiento antes de desaparecer; pinta el
-// halo y devuelve el relleno y el radio con los que dibujar la ficha
-function popFx(x, y, fill, rad){
-  const p = 1 - flashT/FLASH_TIME;         // 0 → 1
-  const e = p*p*(3-2*p);                   // suavizado
+// Pop: fundido rápido a blanco y ligero crecimiento antes de desaparecer. Pinta
+// el halo, la bola al radio del pop y encima el blanco que la funde.
+function popE(){ const p = 1 - flashT/FLASH_TIME; return p*p*(3-2*p); }   // 0 → 1, suavizado
+function popR(rad){ return rad*(1 + 0.30*popE()); }
+function popFx(k, x, y, rad){
+  const e = popE(), rr = popR(rad);
   cx.save();
   cx.globalAlpha = 0.55*(1-e);
   cx.beginPath(); cx.arc(x,y,rad*(1.2+1.1*e),0,7);
   cx.fillStyle = "#ffffff"; cx.fill();
   cx.restore();
-  return [mix(fill, "#ffffff", Math.min(1, e*1.35)), rad*(1 + 0.30*e)];
-}
-function rgba(hex,a){ return `rgba(${hexRGB(hex).join(",")},${a})`; }
-function hexRGB(s){ return [1,3,5].map(i=>parseInt(s.substr(i,2),16)); }
-function mix(a,b,p){
-  const h=hexRGB;
-  const A=h(a),B=h(b);
-  return `rgb(${A.map((v,i)=>Math.round(v+(B[i]-v)*p)).join(",")})`;
+  drawBall(k, x, y, rr);
+  cx.globalAlpha = Math.min(1, e*1.35);
+  cx.beginPath(); cx.arc(x, y, rr*.9, 0, TAU); cx.fillStyle = "#ffffff"; cx.fill();
+  cx.globalAlpha = 1;
 }
 
 // ─── loop ──────────────────────────────────────────────────────────────────
@@ -2489,6 +3251,7 @@ function updateGame(dt){
     if (!idle) spawnT -= dt;
     if (spawnT<=0){
       if (nextSpawn.sine) spawnSine(nextSpawn); else spawnNormal(nextSpawn);
+      teleOut = { aArc:nextSpawn.aArc, k:nextSpawn.k, at:t };
       nextSpawn = pickNext();
       spawnT = SPAWN_MIN + (SPAWN_START-SPAWN_MIN)*Math.exp(-t/SPAWN_RAMP*1.6);
     }
@@ -2511,11 +3274,15 @@ function updateGame(dt){
     }
 
     stepFlying(dt);
+    emitTrail(dt);
     ageBubbles(dt);
   }
   stepFlash(dt);
   easeVisual(dt);
   stepFloaters(dt);
+  stepBg(dt);
+  stepRing(dt);
+  stepTrail(dt);
 }
 
 // Estado del tick anterior, para que draw() interpole entre él y el actual. Sin
@@ -2529,8 +3296,44 @@ function captureDrawPrev(){
   for (const b of flying){ b.dx0 = b.x; b.dy0 = b.y; }
 }
 
+// ─── medidor de fps (temporal, fase de optimización) ───
+// Siempre a la vista, sin tecla ni opción: tiene que salir en el móvil tal cual.
+// Fuera de STR a propósito: es herramienta de desarrollo, no texto del juego.
+// Mide con el `now` de requestAnimationFrame, la marca del vsync, y no toca nada
+// de la partida. La cifra grande son los fps medios del último FPS_BUCKET; avg,
+// la media de las últimas FPS_WINDOW lecturas (5 s); min y max, el frame más
+// lento y el más rápido de esa misma ventana, pasados a fps: el min es el que
+// delata los tirones que la media se traga.
+const FPS_BUCKET = 500, FPS_WINDOW = 10;   // ms por lectura; lecturas en la ventana
+const fpsEl = document.getElementById("fps");
+let fpsPrev = null, fpsN = 0, fpsSum = 0, fpsLong = 0, fpsShort = Infinity;
+const fpsHist = [];                        // {n, sum, long, short} por lectura, la última al final
+function fpsMeter(now){
+  const d = fpsPrev === null ? 0 : now - fpsPrev; fpsPrev = now;
+  if (d <= 0) return;
+  fpsN++; fpsSum += d;
+  if (d > fpsLong) fpsLong = d;
+  if (d < fpsShort) fpsShort = d;
+  if (fpsSum < FPS_BUCKET) return;
+  fpsHist.push({ n: fpsN, sum: fpsSum, long: fpsLong, short: fpsShort });
+  if (fpsHist.length > FPS_WINDOW) fpsHist.shift();
+  let n = 0, sum = 0, long = 0, short = Infinity;
+  for (const h of fpsHist){
+    n += h.n; sum += h.sum;
+    if (h.long > long) long = h.long;
+    if (h.short < short) short = h.short;
+  }
+  fpsEl.textContent = Math.round(1000*fpsN/fpsSum) + " fps · avg " + Math.round(1000*n/sum)
+                    + " · min " + Math.round(1000/long)
+                    + " · max " + Math.round(1000/short);
+  fpsN = 0; fpsSum = 0; fpsLong = 0; fpsShort = Infinity;
+}
+
 let last = performance.now(), acc = 0;
+const scoreEl = document.getElementById("score"), overEl = document.getElementById("over");
+let shownScore = 0;
 function frame(now){
+  fpsMeter(now);
   let e = paused ? 0 : Math.max(0, Math.min(MAX_ELAPSED, (now-last)/1000)); last = now;
   const k = Math.round(e/SIM_DT);          // nunca a 0: a más de 1000 fps se congelaría
   if (k >= 1 && Math.abs(e - k*SIM_DT) < VSYNC_SNAP) e = k*SIM_DT;
@@ -2538,15 +3341,23 @@ function frame(now){
   while (acc >= SIM_DT - ACC_EPS){ captureDrawPrev(); updateGame(SIM_DT); acc -= SIM_DT; }
   draw(Math.max(0, acc)/SIM_DT);
 
-  document.getElementById("score").textContent = score;
+  // el marcador salta al sumar, teñido con el tono del último flotante
+  if (score !== shownScore){
+    if (score > shownScore){
+      scoreEl.style.setProperty("--tint", lastTone || "");
+      scoreEl.classList.remove("bump"); void scoreEl.offsetWidth; scoreEl.classList.add("bump");
+    }
+    shownScore = score;
+    scoreEl.textContent = score;
+  }
   // el récord se mueve durante la partida, en espejo con el marcador de arriba:
   // superarlo es un momento de juego, no un dato de menú.
   if (score > bestScore){ bestScore = score; save.best = bestScore; saveDirty = true; }
   bestEl.textContent = bestScore;
   if (dead){
-    if (!bestSaved){ bestSaved = true; flushIfDirty(); syncTutAgain(); }
-    document.getElementById("over").style.display="flex";
-    document.getElementById("fin").textContent = score+" "+tr("points");
+    if (!bestSaved){ bestSaved = true; flushIfDirty(); syncTutAgain(); showScrim(overEl); }
+    overEl.style.display="flex";
+    setPts(document.getElementById("fin"));
     pzEl.style.visibility = "hidden";
   }
   requestAnimationFrame(frame);
@@ -2554,10 +3365,14 @@ function frame(now){
 // El tiempo pasado en otra pestaña no se simula: se descarta al volver. La marca
 // del primer frame puede ser anterior a este instante, y ahí `e` se satura a 0.
 document.addEventListener("visibilitychange", ()=>{
-  if (!document.hidden){ last = performance.now(); acc = 0; }
+  // la ausencia tampoco cuenta como un frame de varios segundos en el medidor
+  if (!document.hidden){ last = performance.now(); acc = 0; fpsPrev = null; }
 });
 
 resize(); reset(); requestAnimationFrame(frame);
+// wideStage() mide las placas del HUD: con la fuente real puede cambiar el
+// reparto. El canvas no espera: el primer +N llega después de cargarla.
+document.fonts.load('800 1em "Whirlpop Baloo"').then(resize, ()=>{});
 </script>
 </body>
 </html>
