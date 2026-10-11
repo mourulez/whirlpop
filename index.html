@@ -1876,7 +1876,7 @@ function fireBonus(cell){
 // ─── sacudida de la bomba ──────────────────────────────────────────────────
 // Solo visual: `shakeT` corre en updateGame() pero nada de la partida lo lee. El
 // ruido son dos senos desfasados, sin PRNG. Amplitud en CELL: escala con el tablero.
-const SHAKE_AMP = 0.15, SHAKE_TIME = 0.30, SHAKE_HZ = 22;
+const SHAKE_AMP = 0.35, SHAKE_TIME = 0.42, SHAKE_HZ = 22;
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let shakeT = 0;
 // desplazamiento de todo lo que no es fondo, en px CSS; null sin sacudida
