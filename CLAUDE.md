@@ -37,6 +37,9 @@ orientativo: 80 líneas.
   tiene su PRNG con semilla fija (`vrand`, `rrand`, `prand`) y su reloj propio
   avanza en `updateGame()` sin escribir estado de juego: gastarlo desde el dibujo
   cambiaría la partida.
+- Toda caché horneada en un canvas aparte se crea con `bgCanvas()` y se hornea
+  desde `bake()`: si la GPU se reinicia, Chrome devuelve los canvas vacíos y solo
+  eso se rehornea. Se reproduce abriendo `chrome://gpucrash` en otra pestaña.
 - Cero peticiones externas (requisito Poki): fuente e imágenes van en el repo
   con ruta relativa, nada de CDN ni Google Fonts.
 

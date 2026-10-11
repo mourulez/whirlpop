@@ -1062,8 +1062,17 @@ function resize(){
   }
 
   ox = W/2; oy = H/2 - lift;
-  bakeBg(); syncBubOut(); bakeBalls(); bakeTele(); bakeRing();
+  syncBubOut(); bake();
 }
+function bake(){ bakeBg(); bakeBalls(); bakeTele(); bakeRing(); }
+// Si la GPU se reinicia (reposo del equipo, driver; se reproduce con
+// chrome://gpucrash), Chrome devuelve todos los canvas con el contexto vacío. La
+// lava y los trazos se repintan en cada frame, pero lo horneado no: la arena, las
+// bolas, el aviso y el anillo desaparecían hasta el siguiente resize. Avisan el
+// principal y cada caché (bgCanvas()), y frame() rehornea una vez antes de pintar.
+let rebake = false;
+const askRebake = ()=>{ rebake = true; };
+cv.addEventListener("contextrestored", askRebake);
 addEventListener("resize", resize);
 // en móvil el alto real llega tarde al girar el dispositivo
 addEventListener("orientationchange", ()=>setTimeout(resize,120));
@@ -2456,7 +2465,8 @@ const bgClamp = v=>Math.max(0,Math.min(1,v));
 const bgSst   = (a,b,v)=>{ const p=bgClamp((v-a)/(b-a)); return p*p*(3-2*p); };
 const bgEase  = p=>{ p=bgClamp(p); return p<.5 ? 2*p*p : 1-Math.pow(-2*p+2,2)/2; };
 const bgRgb   = c=>`rgb(${c.map(v=>Math.round(Math.max(0,Math.min(255,v)))).join(",")})`;
-function bgCanvas(w,h){ const o=document.createElement("canvas"); o.width=Math.max(1,Math.ceil(w)); o.height=Math.max(1,Math.ceil(h)); return o; }
+function bgCanvas(w,h){ const o=document.createElement("canvas"); o.width=Math.max(1,Math.ceil(w)); o.height=Math.max(1,Math.ceil(h));
+  o.addEventListener("contextrestored", askRebake); return o; }   // ver resize()
 
 // Estado: relojes en segundos, posiciones en fracciones o PS, nada en px. Avanza
 // en stepBg(). Solo `alarm` y `flowPrev` vuelven a 0 con reset(); los relojes,
@@ -3524,6 +3534,7 @@ function frame(now){
   if (k >= 1 && Math.abs(e - k*SIM_DT) < VSYNC_SNAP) e = k*SIM_DT;
   acc += e;
   while (acc >= SIM_DT - ACC_EPS){ captureDrawPrev(); updateGame(SIM_DT); acc -= SIM_DT; }
+  if (rebake){ rebake = false; bake(); }   // contexto devuelto por la GPU: ver resize()
   draw(Math.max(0, acc)/SIM_DT);
 
   // el marcador salta al sumar, teñido con el tono del último flotante
