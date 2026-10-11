@@ -1066,9 +1066,9 @@ function resize(){
 }
 function bake(){ bakeBg(); bakeBalls(); bakeTele(); bakeRing(); }
 // Si la GPU se reinicia (reposo del equipo, driver; se reproduce con
-// chrome://gpucrash), Chrome devuelve todos los canvas con el contexto vacío. La
-// lava y los trazos se repintan en cada frame, pero lo horneado no: la arena, las
-// bolas, el aviso y el anillo desaparecían hasta el siguiente resize. Avisan el
+// chrome://gpucrash), Chrome devuelve todos los canvas con el contexto vacío. Los
+// trazos se repintan en cada frame, pero lo horneado no: la arena, las bolas, el
+// aviso y el anillo desaparecían hasta el siguiente resize. Avisan el
 // principal y cada caché (bgCanvas()), y frame() rehornea una vez antes de pintar.
 let rebake = false;
 const askRebake = ()=>{ rebake = true; };
@@ -2423,8 +2423,9 @@ addEventListener("keydown", e=>{ if (e.key==="f") toggleFS(); });
 // Todo se pinta en gris y un único pase con composición "color" lo tiñe con la
 // gama activa: cambiar de gama o calentar no redibuja nada. Lo que el juego pinta
 // encima no se tiñe.
-const LAVA_RES = 96;                  // celdas del campo en el lado largo del viewport
 const LAVA_BLOBS = 7;
+const LAVA_EXT = 1.25;                // el sprite de bola llega a 1,25·r: cabe el borde difuso
+const LAVA_SPR = 256;                 // lado del sprite: sin píxeles visibles ni a DPR 3
 const LAVA_SPEED = 0.6;               // multiplicador del reloj de la lava
 const LAVA_ALARM_BOOST = 0.8;         // con alarma 1 la lava va a ×1,8 de LAVA_SPEED; 0 lo desactiva
 const LAVA_LUM_TOP = 0.86, LAVA_LUM_BOT = 0.30;
@@ -2485,13 +2486,24 @@ let flowW = FLOW_SPIN, flowDir = 1, flowPrev = 0;   // flowPrev: `angle` del tic
 
 // Cachés que dependen de R, CELL, ox, oy y DPR: se hornean en resize(). La luz
 // viene siempre de arriba a la izquierda.
-let lavaCv, lavaCx, lavaImg, lavaGW, lavaGH, lavaCell;
+let lavaBaseCv, lavaBallCv;
 let lightsCv, bowlCv, bumpCv, bumpD;
 function bakeBg(){
-  // campo de lava: celdas cuadradas, LAVA_RES en el lado largo
-  lavaCell = Math.max(W,H,1)/LAVA_RES;
-  lavaGW = Math.max(1, Math.ceil(W/lavaCell)); lavaGH = Math.max(1, Math.ceil(H/lavaCell));
-  lavaCv = bgCanvas(lavaGW, lavaGH); lavaCx = lavaCv.getContext("2d"); lavaImg = lavaCx.createImageData(lavaGW, lavaGH);
+  // lava: degradado vertical y una bola gris ya borrosa (el desenfoque va en el
+  // perfil, no se calcula por frame). No dependen del viewport, pero se
+  // rehornean aquí para volver con el resto tras un reinicio de la GPU.
+  lavaBaseCv = bgCanvas(2, 256); { const c = lavaBaseCv.getContext("2d"), im = c.createImageData(2, 256), d = im.data;
+    for (let j=0;j<256;j++){ const v = (LAVA_LUM_TOP - (LAVA_LUM_TOP-LAVA_LUM_BOT)*(j+.5)/256)*255;
+      for (let i=0;i<2;i++){ const k = (j*2+i)*4; d[k]=d[k+1]=d[k+2]=v; d[k+3]=255; } }
+    c.putImageData(im,0,0); }
+  lavaBallCv = bgCanvas(LAVA_SPR, LAVA_SPR); { const c = lavaBallCv.getContext("2d"), im = c.createImageData(LAVA_SPR, LAVA_SPR), d = im.data;
+    const h = LAVA_SPR/2;
+    for (let j=0;j<LAVA_SPR;j++) for (let i=0;i<LAVA_SPR;i++){
+      const q = Math.hypot(i+.5-h, j+.5-h)/h*LAVA_EXT;          // distancia en radios de bola
+      // cuerpo: borde difuso de 0,75·r a 1,2·r; núcleo: de 0,3·r a 0,8·r
+      const v = ((1 - bgSst(.75,1.2,q))*LAVA_BLOB_LIFT + (1 - bgSst(.3,.8,q))*LAVA_CORE_LIFT)*255;
+      const k = (j*LAVA_SPR+i)*4; d[k]=d[k+1]=d[k+2]=v; d[k+3]=255; }
+    c.putImageData(im,0,0); }
 
   // luces y sombras del borde del cuenco
   lightsCv = bgCanvas(W*DPR, H*DPR); const l = lightsCv.getContext("2d"); l.scale(DPR,DPR);
@@ -2613,26 +2625,21 @@ function bgPalette(){
   const A = BG_KEYS[i], B = BG_KEYS[(i+1)%BG_KEYS.length], w = Math.pow(alarm, ALARM_CURVE)*ALARM_MAX;
   return [bgMix(bgMix(A[0],B[0],f),BG_WARM[0],w), bgMix(bgMix(A[1],B[1],f),BG_WARM[1],w)];
 }
-// campo de metaballs, recalculado en cada frame: es función pura de lavaT
+// lava: el degradado y las bolas horneadas, sumadas con "lighter" (donde dos se
+// tocan, la zona común sale más clara). Es función pura de lavaT.
 function drawLava(){
-  const d = lavaImg.data, rr = [];
+  cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "low";
+  cx.drawImage(lavaBaseCv, 0, 0, W, H);
+  cx.save(); cx.globalCompositeOperation = "lighter";
   for (const b of BLOBS){
-    const r = (b.r0 + b.ra*Math.sin(lavaT*b.wr + b.ph))*PS/lavaCell;
-    rr.push([(b.x0 + b.ax*Math.sin(lavaT*b.wx*TAU + b.ph))*lavaGW,
-             (b.y0 + b.ay*Math.sin(lavaT*b.wy*TAU + b.ph*1.7))*lavaGH, r*r]);
+    const r = (b.r0 + b.ra*Math.sin(lavaT*b.wr + b.ph))*PS*LAVA_EXT;
+    const x = (b.x0 + b.ax*Math.sin(lavaT*b.wx*TAU + b.ph))*W;
+    const y = (b.y0 + b.ay*Math.sin(lavaT*b.wy*TAU + b.ph*1.7))*H;
+    cx.drawImage(lavaBallCv, x - r, y - r, 2*r, 2*r);
   }
-  let k = 0;
-  for (let j=0;j<lavaGH;j++){
-    const base = LAVA_LUM_TOP - (LAVA_LUM_TOP-LAVA_LUM_BOT)*j/lavaGH;
-    for (let i=0;i<lavaGW;i++){
-      let f = 0; for (let n=0;n<rr.length;n++){ const dx=i-rr[n][0], dy=j-rr[n][1]; f += rr[n][2]/(dx*dx+dy*dy+1); }
-      const v = Math.min(1, base + bgSst(.85,1.3,f)*LAVA_BLOB_LIFT + bgSst(1.3,3.2,f)*LAVA_CORE_LIFT)*255;
-      d[k]=d[k+1]=d[k+2]=v; d[k+3]=255; k+=4;
-    }
-  }
-  lavaCx.putImageData(lavaImg,0,0);
-  cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
-  cx.drawImage(lavaCv, 0, 0, lavaGW*lavaCell, lavaGH*lavaCell);
+  cx.restore();
+  // todo lo que se pinta después en el frame (cuenco, sprites) hereda este estado
+  cx.imageSmoothingQuality = "high";
 }
 function drawBg(){
   drawLava();
