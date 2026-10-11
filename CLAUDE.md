@@ -58,6 +58,9 @@ orientativo: 80 líneas.
   dos que alternaban (un barrido naranja hacia fuera y la bomba en turquesa) y se
   dejó solo la bomba para simplificar. No se reintroduce un segundo bonus ni la
   alternancia sin decidirlo antes.
+- La bomba es el único evento que sacude la cámara (y solo el tablero, no el
+  fondo; nada con `prefers-reduced-motion`). No se añade shake a pops, combos,
+  nivel ni game over sin decidirlo antes.
 - La carga llega al anillo con los orbes, no en el match: cada bola del match
   vuela a la punta y el arco crece al llegar; la bomba sale cuando lo cierra el
   último. Un solo gesto del destello a la punta (`drawCharge()`), todos a la vez
