@@ -2444,6 +2444,8 @@ const BOWL_RES = 80, BOWL_EXT = 1.12, BOWL_FADE0 = 0.86, BOWL_FADE1 = 1.06;
 const BUMP_R = 0.45*1.12;             // en CELL: el mismo radio que la roca central de hoy
 const BUB_OUT_DENSITY = 20;           // burbujas de la zona lisa por PS²
 const BUB_IN = 14;
+// Atlas de burbujas (ver bakeBubs()): radios en px CSS, en progresión geométrica
+const BUB_R0 = 0.6, BUB_STEP = 1.12;
 // Giro de las burbujas del cuenco: una sola velocidad `flowW`, en rad/s en
 // FLOW_RHO0, que cada burbuja multiplica por (FLOW_RHO0/ρ)^FLOW_EXP —más rápido
 // hacia el centro—. Tiene inercia: el giro del tablero la empuja y, sin input,
@@ -2522,6 +2524,59 @@ function bakeBg(){
   ud(0,0,hr, ug(hr*.25,hr*.3,hr*.45,hr*.25,hr*.3,hr*1.05,[[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,.22)"]]));
   u.save(); u.translate(-hr*.34,-hr*.4); u.rotate(-.7); u.beginPath(); u.ellipse(0,0,hr*.26,hr*.14,0,0,TAU); u.fillStyle="rgba(255,255,255,.75)"; u.fill(); u.restore();
   u.beginPath(); u.arc(0,0,hr-.5,-.2,Math.PI*.8); u.strokeStyle="rgba(0,0,0,.18)"; u.lineWidth=1; u.stroke();
+
+  bakeBubs();
+}
+// Todas las burbujas —fondo y estela— salen de un atlas por drawImage, en vez de
+// trazarse: un arco por burbuja con un strokeStyle nuevo costaba en el hard drop.
+// Una fila por familia y una columna por radio, la misma lista en las tres. Al
+// pintar se elige el escalón más cercano en escala logarítmica y se escala al
+// radio exacto: con razón 1,12 el grosor aparente varía como mucho un ±6 %.
+// F_TRH lleva el brillo de la estela gruesa; su anillo, a .9375, conserva la
+// proporción 0,75 : 0,8 entre anillo y brillo. Se pinta en blanco opaco: el alfa
+// lo pone drawBub().
+const F_BG = 0, F_TR = 1, F_TRH = 2;
+const BUB_LW = [.8, .9, .9];
+let bubCv, bubN = 0, bubSx, bubSy, bubSw, bubDw, bubRb;
+function bakeBubs(){
+  const rMax = Math.max(BUB_R0, .018*1.4*PS);   // radio máximo de la estela
+  bubN = Math.ceil(Math.log(rMax/BUB_R0)/Math.log(BUB_STEP)) + 1;
+  bubSx = new Float32Array(3*bubN); bubSy = new Float32Array(3*bubN);
+  bubSw = new Float32Array(3*bubN); bubDw = new Float32Array(3*bubN); bubRb = new Float32Array(3*bubN);
+  // a DPR, pero nunca por debajo de 2: a DPR 1 el remuestreo a posición
+  // subpíxel rellenaba el hueco de los anillos más pequeños
+  const Q = Math.max(2, DPR), GAP = 4;   // GAP: px vacíos entre celdas, para que el filtrado no sangre
+  let w = 0, y = 0;
+  for (let f=0;f<3;f++){
+    let x = 0, h = 0;
+    for (let i=0;i<bubN;i++){
+      const j = f*bubN + i, rb = BUB_R0*Math.pow(BUB_STEP, i);
+      const p = Math.ceil(Math.ceil(2*(rb + BUB_LW[f]/2 + 1))*Q);
+      bubSx[j] = x; bubSy[j] = y; bubSw[j] = p; bubDw[j] = p/Q; bubRb[j] = rb;
+      x += p + GAP; h = Math.max(h, p);
+    }
+    w = Math.max(w, x); y += h + GAP;
+  }
+  bubCv = bgCanvas(w, y); const o = bubCv.getContext("2d");
+  o.fillStyle = o.strokeStyle = "#fff";
+  for (let j=0;j<3*bubN;j++){
+    const f = Math.floor(j/bubN), rb = bubRb[j], c = bubSw[j]/2;
+    o.setTransform(Q,0,0,Q, bubSx[j] + c, bubSy[j] + c);
+    o.globalAlpha = f===F_TRH ? .9375 : 1; o.lineWidth = BUB_LW[f];
+    o.beginPath(); o.arc(0,0,rb,0,TAU); o.stroke();
+    if (f===F_TRH){ o.globalAlpha = 1; o.beginPath(); o.arc(-rb*.35,-rb*.35,rb*.22,0,TAU); o.fill(); }
+  }
+}
+// burbuja de la familia `fam` centrada en (x,y), px CSS. Deja globalAlpha
+// cambiado: quien pinta un bloque lo devuelve a 1 al terminar.
+const BUB_ILOG = 1/Math.log(BUB_STEP);
+function drawBub(fam, x, y, r, a){
+  if (r < BUB_R0) r = BUB_R0;
+  let i = Math.round(Math.log(r/BUB_R0)*BUB_ILOG);
+  if (i >= bubN) i = bubN - 1;
+  const j = fam*bubN + i, sw = bubSw[j], dw = bubDw[j]*r/bubRb[j];
+  cx.globalAlpha = a;
+  cx.drawImage(bubCv, bubSx[j], bubSy[j], sw, sw, x - dw/2, y - dw/2, dw, dw);
 }
 // las burbujas de la zona lisa siguen la densidad por PS²: al cambiar de ventana
 // se añaden o se quitan por el final, y las que quedan no se mueven
@@ -2579,23 +2634,25 @@ function drawLava(){
   cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
   cx.drawImage(lavaCv, 0, 0, lavaGW*lavaCell, lavaGH*lavaCell);
 }
-function bgRing(x,y,r,a){ cx.strokeStyle=`rgba(255,255,255,${a})`; cx.lineWidth=.8; cx.beginPath(); cx.arc(x,y,Math.max(.6,r),0,TAU); cx.stroke(); }
 function drawBg(){
   drawLava();
   // burbujas de la zona lisa: no se pintan dentro del cuenco
+  const in2 = R*1.08*R*1.08;
   for (const b of bubOut){
-    const x = b.u*W + Math.sin(bgT*.8+b.ph)*PS*.013, y = b.v*H;
-    if (Math.hypot(x-ox, y-oy) < R*1.08) continue;
-    const pl = .5+.5*Math.sin(bgT*1.3+b.ph); bgRing(x, y, b.sz*PS*(1+.3*pl), .22+.33*pl);
+    const x = b.u*W + Math.sin(bgT*.8+b.ph)*PS*.013, y = b.v*H, dx = x-ox, dy = y-oy;
+    if (dx*dx + dy*dy < in2) continue;
+    const pl = .5+.5*Math.sin(bgT*1.3+b.ph); drawBub(F_BG, x, y, b.sz*PS*(1+.3*pl), .22+.33*pl);
   }
+  cx.globalAlpha = 1;
   cx.drawImage(lightsCv, 0, 0, W, H);
   cx.drawImage(bowlCv, ox-R*BOWL_EXT, oy-R*BOWL_EXT, R*BOWL_EXT*2, R*BOWL_EXT*2);
   // burbujas del cuenco: el giro con inercia de stepBg()
   for (const b of bubIn){
     const a = b.th;
     const pl = .5+.5*Math.sin(bgT*1.3+b.ph);
-    bgRing(ox + Math.cos(a)*b.rho*R, oy + Math.sin(a)*b.rho*R, b.sz*PS*(1+.3*pl), .25+.35*pl);
+    drawBub(F_BG, ox + Math.cos(a)*b.rho*R, oy + Math.sin(a)*b.rho*R, b.sz*PS*(1+.3*pl), .25+.35*pl);
   }
+  cx.globalAlpha = 1;
   // es la roca central (b.k<0): el montón ya no la pinta
   cx.drawImage(bumpCv, ox-bumpD/2, oy-bumpD/2, bumpD, bumpD);
   // pase de color: tiñe todo lo anterior con la gama activa
@@ -2875,11 +2932,19 @@ function drawShadow(x, y, r, lift){
 // Lo que distingue el hard drop: más burbujas y más gordas, sin aro ni trazo.
 // Solo decorado, en el mundo y en PS como las bolas en vuelo. Nace y avanza en
 // updateGame() con su PRNG `prand` —ni Math.random ni vrand ni rrand—, así que la
-// partida es la misma con o sin ella.
+// partida es la misma con o sin ella. Blancas, del atlas de bakeBubs().
+// Pool fijo en anillo, sin asignar nada por frame: `trailHead` es el siguiente
+// hueco y los `trailN` anteriores son los ocupados, vivos o no. Lleno, la nueva
+// pisa a la más antigua emitida; con hard drop eso solo recorta burbujas de más
+// de 0,8 s, ya casi transparentes.
 const BUB_TRAIL_N = 1, BUB_TRAIL_HARD = 5;   // por tick y bola en vuelo
-const BUB_TRAIL_MAX = 240;                   // vivas; sobran las más viejas
+const BUB_TRAIL_MAX = 240;                   // emitidas; sobran las más viejas
 const prand = mulberry32(0xb0b1e);
-let trailBubs = [];
+const trX = new Float32Array(BUB_TRAIL_MAX), trY = new Float32Array(BUB_TRAIL_MAX),
+      trVx = new Float32Array(BUB_TRAIL_MAX), trVy = new Float32Array(BUB_TRAIL_MAX),
+      trR = new Float32Array(BUB_TRAIL_MAX), trLife = new Float32Array(BUB_TRAIL_MAX),
+      trAge = new Float32Array(BUB_TRAIL_MAX);
+let trailHead = 0, trailN = 0;
 // tras stepFlying(): la velocidad sale del avance del tick, así que vale igual
 // para radiales, sinusoides y la espiral de la especial
 function emitTrail(dt){
@@ -2887,35 +2952,33 @@ function emitTrail(dt){
   for (const b of flying){
     const vx = (b.x - b.px)/dt, vy = (b.y - b.py)/dt;
     const n = b.hard ? BUB_TRAIL_HARD : BUB_TRAIL_N;
-    const L = b.bonus ? RING_G : (b.k===WHITE ? JEWEL_WHITE : JEWEL[b.k])[0];
     for (let i=0;i<n;i++){
-      const kv = .05 + prand()*.1;
-      trailBubs.push({
-        x: b.x + (prand()-.5)*rad, y: b.y + (prand()-.5)*rad,
-        vx: -vx*kv + (prand()-.5)*.05, vy: -vy*kv + (prand()-.5)*.05,
-        r: b.hard ? .006 + prand()*.012 : .004 + prand()*.008,
-        life: .45 + prand()*.45, age: 0,
-        tint: prand() < .35 ? bgMix(L, [255,255,255], .3).map(Math.round).join(",") : null });
+      const kv = .05 + prand()*.1, j = trailHead;
+      trX[j] = b.x + (prand()-.5)*rad; trY[j] = b.y + (prand()-.5)*rad;
+      trVx[j] = -vx*kv + (prand()-.5)*.05; trVy[j] = -vy*kv + (prand()-.5)*.05;
+      trR[j] = b.hard ? .006 + prand()*.012 : .004 + prand()*.008;
+      trLife[j] = .45 + prand()*.45; trAge[j] = 0;
+      trailHead = (j + 1) % BUB_TRAIL_MAX;
+      if (trailN < BUB_TRAIL_MAX) trailN++;
     }
   }
-  if (trailBubs.length > BUB_TRAIL_MAX) trailBubs.splice(0, trailBubs.length - BUB_TRAIL_MAX);
 }
 function stepTrail(dt){
-  for (const p of trailBubs){ p.age += dt; p.x += p.vx*dt; p.y += p.vy*dt; p.vx *= .96; p.vy *= .96; }
-  trailBubs = trailBubs.filter(p => p.age < p.life);
-}
-function drawTrail(){
-  cx.lineWidth = .9;
-  for (const p of trailBubs){
-    const k = 1 - p.age/p.life, [x,y] = toScreen(p.x, p.y);
-    const r = Math.max(.6, p.r*PS*(.6 + .8*(1-k)));
-    cx.strokeStyle = p.tint ? `rgba(${p.tint},${.7*k})` : `rgba(255,255,255,${.75*k})`;
-    cx.beginPath(); cx.arc(x, y, r, 0, TAU); cx.stroke();
-    if (r > 2){
-      cx.fillStyle = `rgba(255,255,255,${.8*k})`;
-      cx.beginPath(); cx.arc(x - r*.35, y - r*.35, r*.22, 0, TAU); cx.fill();
-    }
+  for (let n=0, j=(trailHead - trailN + BUB_TRAIL_MAX) % BUB_TRAIL_MAX; n<trailN; n++, j=(j+1) % BUB_TRAIL_MAX){
+    if (trAge[j] >= trLife[j]) continue;
+    trAge[j] += dt; trX[j] += trVx[j]*dt; trY[j] += trVy[j]*dt; trVx[j] *= .96; trVy[j] *= .96;
   }
+}
+// de la más antigua a la más nueva, como antes
+function drawTrail(){
+  for (let n=0, j=(trailHead - trailN + BUB_TRAIL_MAX) % BUB_TRAIL_MAX; n<trailN; n++, j=(j+1) % BUB_TRAIL_MAX){
+    if (trAge[j] >= trLife[j]) continue;
+    const k = 1 - trAge[j]/trLife[j];
+    const r = Math.max(.6, trR[j]*PS*(.6 + .8*(1-k)));
+    if (r > 2) drawBub(F_TRH, ox + trX[j]*PS, oy + trY[j]*PS, r, .8*k);
+    else       drawBub(F_TR,  ox + trX[j]*PS, oy + trY[j]*PS, r, .75*k);
+  }
+  cx.globalAlpha = 1;
 }
 
 // ─── dibujo ────────────────────────────────────────────────────────────────
