@@ -58,6 +58,11 @@ orientativo: 80 líneas.
   dos que alternaban (un barrido naranja hacia fuera y la bomba en turquesa) y se
   dejó solo la bomba para simplificar. No se reintroduce un segundo bonus ni la
   alternancia sin decidirlo antes.
+- La carga llega al anillo con los orbes, no en el match: cada bola del match
+  vuela a la punta y el arco crece al llegar; la bomba sale cuando lo cierra el
+  último. Un solo gesto del destello a la punta (`drawCharge()`), todos a la vez
+  y en `ORB_TRIP`. Se probó con salidas escalonadas, anticipación y ondas, y se
+  descartó por poco fluido y por complejo.
 - La bola que no cabe se juzga antes de morir (hueco liberado o match desde
   fuera), pero solo espera una a la vez: sin cola. La espera dura un destello y
   en 16.000 partidas no llegó nunca una segunda; si llega, muere sin juicio.

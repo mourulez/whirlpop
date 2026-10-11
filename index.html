@@ -508,6 +508,7 @@ const TOP_KEEP = 0.09;
 const RING_GAP    = 0.0085;      // aire entre trazos contiguos, múltiplo de PS
 const GAUGE_W     = 0.008;       // trazo del gauge de antes: ya solo sitúa el radio del rayo
 const BORDER_W    = 0.012;       // frontera = GAUGE_W * 1.5; no se traza, solo sitúa los otros dos
+const GAUGE_RAD   = R_FACTOR - BORDER_W/2 - RING_GAP - GAUGE_W/2;   // radio del rayo, en PS
 const TELE_W      = 0.018;       // aviso    = BORDER_W * 1.5: núcleo opaco
 const TELE_HALO_W = 0.10;        // resplandor del aviso: fuera de la progresión
 // borde exterior del halo: lo más lejano que se dibuja del juego (las fichas
@@ -517,7 +518,7 @@ const WIDE_AIR    = 0.03;        // landscape: aire del halo al borde de pantall
 const SIDE_AIR    = 0.04;        // landscape: aire a cada lado de un marcador
 const GAUGE_A0    = Math.PI;     // ancla: 9 en punto
 const GAUGE_TWEEN = 11;          // seguimiento del valor visual hacia el lógico
-const GAUGE_FLASH = 0.22;        // destello del anillo cerrado, en segundos
+const GAUGE_FLASH = 0.35;        // destello del anillo cerrado, en segundos
 // El anillo se llena con los mismos puntos que suma el marcador: lo que el jugador
 // ve flotar es lo que avanza el aro, combo incluido. Capacidad: 24 tríos.
 const GAUGE_MAX   = 360;
@@ -577,7 +578,7 @@ const LEVELS = [
   // Va en `intro` y no en `on` porque quien ya se sabe el anillo lo tiene desde
   // el frame cero (ver gaugeOn()): ese salto sería un bonus regalado a mitad de
   // partida y sin texto que lo justifique.
-  { n:4, id:"gauge",  at:90,  intro(){ gauge = GAUGE_INTRO; } },
+  { n:4, id:"gauge",  at:90,  intro(){ gauge = gaugeL = GAUGE_INTRO; } },
   // El púrpura no puede esperar al azar: con 5 colores en la bolsa podría tardar
   // varias fichas en salir y el tip se leería sin nada que mirar. `forceK` reserva
   // el color de la próxima ficha, y si el aviso de la pendiente todavía no ha
@@ -723,7 +724,7 @@ function showLevel(){
 // ─── estado ────────────────────────────────────────────────────────────────
 const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,DPR,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
-let grid, angle, angleT, anglePrev, flying, score, gauge, gaugeV, gaugeFlashT, t, spawnT, dead, deadBall, outBall, nextSpawn, whiteT, lastColorAngle;
+let grid, angle, angleT, anglePrev, flying, score, gauge, gaugeL, gaugeV, gaugeEpoch, gaugeFlashT, t, spawnT, dead, deadBall, outBall, nextSpawn, whiteT, lastColorAngle;
 let level, tipT, gaugeEarly, forceK, prevSine, forceSine;
 // el aviso de la ficha que acaba de salir: solo lo lee el dibujo (ver drawTele())
 let teleOut;
@@ -942,7 +943,8 @@ function reset(){
       if (k >= 0) grid[idx(c,r)] = { k, age:0, vc:c, vr:r, fresh:false };
     }
   ctrlTurn = false;
-  angle = angleT = anglePrev = angleD0 = 0; flying = []; score = 0; gauge = gaugeV = gaugeFlashT = 0;
+  angle = angleT = anglePrev = angleD0 = 0; flying = []; score = 0;
+  gauge = gaugeL = gaugeV = gaugeV0 = gaugeFlashT = 0; gaugeEpoch = 0; orbs = []; ringClear();
   simTick = 0;
   spawnT = 0.9; teleOut = null; whiteT = WHITE_INT_START; dead = false; deadBall = outBall = null; lastColorAngle = null;
   forceK = null; prevSine = false; forceSine = null;
@@ -1041,7 +1043,7 @@ function resize(){
   // la frontera manda: los otros dos anillos se sitúan a RING_GAP de su trazo.
   // Del aviso se guarda el borde INTERIOR: núcleo y resplandor crecen solo hacia
   // fuera desde él, y el aire contra la frontera no depende de su latido.
-  gaugeRad  = R - PS*(BORDER_W/2 + RING_GAP + GAUGE_W/2);
+  gaugeRad  = PS*GAUGE_RAD;
   teleRadIn = R + PS*(BORDER_W/2 + RING_GAP);
 
   // En vertical los pulgares van debajo de la esfera, como los mandos de una
@@ -1060,7 +1062,7 @@ function resize(){
   }
 
   ox = W/2; oy = H/2 - lift;
-  bakeBg(); syncBubOut(); bakeBalls(); bakeTele();
+  bakeBg(); syncBubOut(); bakeBalls(); bakeTele(); bakeRing();
 }
 addEventListener("resize", resize);
 // en móvil el alto real llega tarde al girar el dispositivo
@@ -1091,6 +1093,10 @@ function cellToScreen(fc,fr){
 function worldToCellA(x,y,ang){
   const s=Math.sin(-ang), co=Math.cos(-ang);
   return [(x*co - y*s)/CELL_PS + C, (x*s + y*co)/CELL_PS + C];
+}
+function cellToWorldA(fc,fr,ang){
+  const lx=(fc-C)*CELL_PS, ly=(fr-C)*CELL_PS, s=Math.sin(ang), co=Math.cos(ang);
+  return [lx*co - ly*s, lx*s + ly*co];
 }
 // ─── spawn y vuelo ─────────────────────────────────────────────────────────
 // se decide con antelación para poder telegrafiarlo.
@@ -1783,7 +1789,7 @@ function commitFlash(){
       score += pts;
       // sin carga disponible los matches puntúan igual pero no cargan nada: el
       // anillo aparece a cero cuando abre, sin arrastre de lo anterior.
-      if (gaugeOn()) gauge = Math.min(GAUGE_MAX, gauge + pts);
+      if (gaugeOn()){ gauge = Math.min(GAUGE_MAX, gauge + pts); launchOrbs(comp, pts); }
     }
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
     if (flashSet.has(OUT)) outBall = null;
@@ -1861,6 +1867,43 @@ function boardClean(){
   if (outBall) return false;                            // la que espera fuera también cuenta
   for (const g of grid) if (g && g.k>=0) return false;   // la piedra central (k<0) no
   return true;
+}
+
+// ─── orbes de carga ────────────────────────────────────────────────────────
+// La carga de un match no llega al anillo de golpe: cada bola suelta un orbe que
+// vuela a la punta, y el arco crece con lo que llega. `gauge` suma en el
+// commitFlash(), como siempre; `gaugeL` es lo ya llegado, y es lo que persigue
+// el arco y lo que dispara la bomba (ver updateGame()). Son estado de partida:
+// salen en el commit y llegan ORB_TRIP después, sin PRNG, así que la partida
+// sigue siendo determinista. Las bolas de un grupo salen y llegan juntas, y el
+// crédito del grupo va entero en la primera. Cada disparo abre una época: lo
+// que estaba en vuelo de la anterior llega sin abonar, porque esa carga ya se
+// cobró. El origen queda en el mundo: el tablero sigue girando y el orbe no.
+// Todo lo que se ve, del destello a la punta, lo pinta drawCharge().
+const ORB_TRIP = 0.5;                 // s del commit a la punta
+let orbs = [];
+// punta del arco para un valor de carga, en mundo
+function gaugeTip(v){
+  const a = GAUGE_A0 + Math.max(0, Math.min(1, v/GAUGE_MAX))*TAU;
+  return [Math.cos(a)*GAUGE_RAD, Math.sin(a)*GAUGE_RAD];
+}
+// un orbe por bola del grupo, la de fuera incluida, desde su posición visual
+function launchOrbs(comp, pts){
+  comp.forEach((i, n) => {
+    const b = i===OUT ? outBall : grid[i], [c,r] = cellOf(i);
+    const [x,y] = cellToWorldA(b && b.vc!==undefined ? b.vc : c, b && b.vr!==undefined ? b.vr : r, angle);
+    orbs.push({ x, y, age:0, a0:0, cr: n ? 0 : pts, ep:gaugeEpoch });
+  });
+}
+function stepOrbs(dt){
+  let arrived = false;
+  for (let i=orbs.length-1;i>=0;i--){
+    const o = orbs[i];
+    if ((o.age += dt) < ORB_TRIP - 1e-9) continue;
+    orbs.splice(i, 1); arrived = true;
+    if (o.ep === gaugeEpoch) gaugeL = Math.min(gauge, gaugeL + o.cr);
+  }
+  if (arrived) ringGulp();            // un trago por llegada, no por orbe
 }
 
 // ─── textos flotantes de puntuación ────────────────────────────────────────
@@ -2853,192 +2896,293 @@ function drawTrail(){
 // medio ancho de PS*0.5 en portrait, con el anclaje de las 9 fuera de pantalla.
 // Va por dentro de la frontera, a unos píxeles, de forma que el aro entero es
 // visible en cualquier viewport. Contrapartida asumida: con el montón crecido las
-// fichas exteriores lo tapan — se dibuja debajo de ellas.
-// Se pinta como un rayo lima, el color de la bola especial que suelta: un tubo
-// de plasma con tres hebras quebradas que saltan a golpes, arcos que salen del
-// tubo y vuelven a él, descargas periódicas y una punta de plasma en el extremo
-// de la carga. Sin pista: lo no cargado no
-// tiene trazo. Es solo dibujo: de la partida lee gaugeV y gaugeFlashT, y tiene su
-// reloj `ringT` y su PRNG `rrand` —ni Math.random ni vrand—, así que no mueve ni
-// la partida ni las burbujas. Calibración aprobada en el prototipo: verde 10%,
-// energía 10%, velocidad 50%, separación de arcos 30%.
-const RING_SPEED   = 0.5;           // escala todo el tiempo del rayo
-const ENERGY       = 0.10;
-const ENERGY_K     = 0.44;          // = .35 + .9·ENERGY
-const BOLT_AMP     = 0.0134;        // desvío de las hebras, en PS: = .012 + .014·ENERGY
-const BOLT_STEP    = 0.35;          // rad de arco entre puntos base de una hebra
-const ARC_H        = 0.0176;        // altura de los arcos, en PS: = .008 + .032·separación
-const REGEN_MIN = 0.05, REGEN_VAR = 0.07;    // vida de cada forma, en s de ringT
-const STRIKE_MIN = 0.70, STRIKE_VAR = 1.50;  // entre descargas, en s de ringT
-const STRIKE_DECAY = 4.5;           // por s de ringT
-const RING_G = [176,255,34], RING_GLO = [222,255,160], RING_CORE = [250,255,228], RING_GD = [70,120,0];
+// fichas exteriores lo tapan — se dibuja debajo de ellas. La punta, los orbes y
+// las chispas van encima (drawRingTop()), así que la punta puede verse sobre
+// fichas que tapan el resto del rayo.
+// Se pinta como un rayo lima fino, el color de la bola especial que suelta: un
+// halo, una hebra principal quebrada con alma blanca, una hebra fina con una
+// onda que fluye y arcos que salen de la principal y vuelven a ella. Sin pista:
+// lo no cargado no tiene trazo.
+// Todo en source-over: con "lighter" el verde sumaba el fondo y se lavaba a
+// blanco, distinto en cada gama. Ni clip, ni sombras, ni filtros; estilos en
+// cadenas fijas y la intensidad en globalAlpha; los sprites se hornean en
+// resize() y los puntos van en Float32Array. Por frame no se crea nada salvo
+// los degradados de la punta (2) y uno por orbe en vuelo.
+// Es solo dibujo: de la partida lee gaugeV, orbs y gaugeFlashT, y tiene su reloj
+// `ringT` y su PRNG `rrand` —ni Math.random ni vrand—, así que no mueve ni la
+// partida ni las burbujas. Igual a 60 que a 120 Hz: la forma cambia por reloj,
+// no por frame, y lo continuo (avance del arco, onda, orbes, chispas) se evalúa
+// con lo que draw() interpola entre ticks (`gaugeVd`, `ringTd`, `ringAlpha`).
+const RING_G = [176,255,34], RING_CORE = [250,255,228];
+const RING_GS = "rgb(176,255,34)", RING_WS = "#fff";
+const RING_W = 0.00325;               // grosor base del rayo, en PS
+const HALO_H = 0.0325;                // semiancho del halo, en PS
+const RING_REGEN = 18;                // formas nuevas por segundo, de media
+const STRIKE_DECAY = 2.5, GULP_DECAY = 6;   // por segundo
+const MAIN_STEP = 0.04, MAIN_MAX = 240;     // hebra principal: PS de arco por punto, tope
+const FINE_STEP = 0.0175;                   // hebra fina: PS de arco por punto
+const FINE_MAX = Math.ceil(TAU*GAUGE_RAD/FINE_STEP) + 1;
+const ARC_MAX = 6, ARC_PTS = 9;
+const SPARK_MAX = 64, SPARK_SPEED = 0.425, SPARK_CLOSE = 0.55;   // PS/s
+const ORB_N = 10, TIP_N = 12;         // muestras de la estela y del abultamiento
+const ORB_WHITE = 0.10;               // s en que la bola que carga se funde a blanco
+const ORB_LIGHT = 0.5;                // fracción del camino en que ya es solo luz
 const rrand = mulberry32(0xb017);
 
-// Cada punto es [u, d]: u ∈ [0,1] a lo largo del arco cargado y d el desvío
-// radial en PS. Al crecer o vaciarse el arco las formas se estiran sin
-// regenerarse; solo cambian al vencer su temporizador. `ringT` no vuelve a 0 con
+// Las formas son desvíos radiales d, en PS, sobre puntos repartidos en u ∈ [0,1]
+// del arco cargado: al crecer el arco se estiran, y solo se rehacen al vencer su
+// temporizador. `strike` sube con cada orbe que llega y engorda el rayo; `gulp`
+// es el trago de la punta, función de `ringGulpT`. `ringT` no vuelve a 0 con
 // reset(), como los relojes del fondo.
-let ringT = 0;
-const ring = { strike:0, nextStrike:0, tipNext:0, tipArcs:[],
-  strands:[1.25, 0.8, 0.55].map(w=>({ next:0, int:1, w, pts:null, arcs:[] })) };
+let ringT = 0, ringNext = 0, ringStrike = 0, ringGulpT = -1e9;
+let ringAlpha = 1, ringTd = 0, gaugeVd = 0;
+let mainN = 0, fineN = 0, arcN = 0;
+const mainD = new Float32Array(MAIN_MAX), fineD = new Float32Array(FINE_MAX);
+const arcU = new Float32Array(ARC_MAX*ARC_PTS), arcD = new Float32Array(ARC_MAX*ARC_PTS);
+const orbX = new Float32Array(ORB_N), orbY = new Float32Array(ORB_N);
+const tipX = new Float32Array(TIP_N), tipY = new Float32Array(TIP_N);
+// chispas: pool fijo, en mundo
+let spkI = 0;
+const spkX = new Float32Array(SPARK_MAX), spkY = new Float32Array(SPARK_MAX);
+const spkVX = new Float32Array(SPARK_MAX), spkVY = new Float32Array(SPARK_MAX);
+const spkT0 = new Float64Array(SPARK_MAX), spkLife = new Float32Array(SPARK_MAX);   // t0: ringT no tiene tope
+function ringClear(){ spkLife.fill(0); ringGulpT = -1e9; }
 
 // un tick del rayo, junto al del fondo: con `paused` no corre y el rayo se congela
 function stepRing(dt){
-  ringT += dt*RING_SPEED;
-  ring.strike = Math.max(0, ring.strike - dt*RING_SPEED*STRIKE_DECAY);
-  if (ringT >= ring.nextStrike){ ring.strike = 1; ring.nextStrike = ringT + STRIKE_MIN + rrand()*STRIKE_VAR; }
+  ringT += dt;
+  ringStrike = Math.max(0, ringStrike - dt*STRIKE_DECAY);
+  const p = gaugeOn() ? gaugeV/GAUGE_MAX : 0;
+  if (p <= .002) mainN = 0;                       // al reaparecer, forma nueva
+  else if (!mainN || ringT >= ringNext) ringShape(Math.min(1, p));
 }
-
-// desplazamiento de punto medio: en cada pasada un punto nuevo por segmento, con
-// u movido ±17,5% del segmento y d ± el desvío, que se multiplica por .55
-function ringJag(P, dev, passes){
-  for (let n=0;n<passes;n++){
-    const Q = [P[0]];
-    for (let i=1;i<P.length;i++){
-      const a = P[i-1], b = P[i];
-      Q.push([(a[0]+b[0])/2 + (rrand()-.5)*(b[0]-a[0])*.35, (a[1]+b[1])/2 + (rrand()-.5)*2*dev]);
-      Q.push(b);
+// rehace las tres piezas a la vez —hebra principal, hebra fina y arcos— para un
+// arco cargado de p vueltas
+function ringShape(p){
+  ringNext = ringT + (.7 + .6*rrand())/RING_REGEN;
+  const L = p*TAU*GAUGE_RAD, st = ringStrike, amp = .0045 + .005*st;
+  mainN = Math.max(2, Math.min(MAIN_MAX, Math.round(L/MAIN_STEP) + 1));
+  for (let j=0;j<mainN;j++) mainD[j] = j && j < mainN-1 ? (2*rrand() - 1)*amp : 0;
+  fineN = Math.max(2, Math.min(FINE_MAX, Math.round(L/FINE_STEP) + 1));
+  for (let j=0;j<fineN;j++) fineD[j] = j && j < fineN-1 ? .45*amp*(2*rrand() - 1) : 0;
+  // cada arco sale de la hebra principal y vuelve a ella: ninguno queda suelto
+  arcN = Math.min(ARC_MAX, Math.round(.5*(1 + 1.5*st)*Math.min(6, L/.175)));
+  for (let a=0;a<arcN;a++){
+    const su = Math.min(1, (.045 + .075*rrand())/L), u0 = rrand()*(1 - su);
+    const h = (rrand() < .6 ? 1 : -1)*(.010 + .0125*rrand())*(1 + .5*st);
+    for (let q=0;q<ARC_PTS;q++){
+      const v = q/(ARC_PTS-1), u = u0 + su*v, n = a*ARC_PTS + q;
+      arcU[n] = u;
+      arcD[n] = mainAt(u) + h*Math.sin(Math.PI*v) + (q && q < ARC_PTS-1 ? (2*rrand() - 1)*.0035 : 0);
     }
-    P = Q; dev *= .55;
-  }
-  return P;
-}
-// arco que nace y muere en el tubo, entre u0 y u1, con altura h en PS (+ fuera)
-function ringArch(u0, u1, h){
-  const P = [];
-  for (let i=0;i<=6;i++){ const q = i/6; P.push([u0+(u1-u0)*q, h*Math.sin(Math.PI*q)]); }
-  return ringJag(P, Math.abs(h)*.18, 2);
-}
-// rehace la hebra i y sus arcos para un arco cargado de L rad
-function ringStrand(s, i, L){
-  s.next = ringT + REGEN_MIN + rrand()*REGEN_VAR;
-  s.int = .6 + .4*rrand();
-  const amp = BOLT_AMP*s.w*(1 + .6*ring.strike);
-  const n = Math.max(2, Math.ceil(L/BOLT_STEP)), P = [];
-  for (let j=0;j<=n;j++) P.push([j/n, (j===0 || j===n) ? 0 : (rrand()-.5)*2*amp]);
-  s.pts = ringJag(P, .55*amp, 3);
-  s.arcs = [];
-  const na = Math.round((i===0 ? 1.5 : 0.8)*(.6 + 1.6*ENERGY)*(1 + ring.strike));
-  for (let f=0;f<na;f++){
-    const span = .12 + rrand()*.38, a0 = rrand()*Math.max(.01, L-span), a1 = Math.min(L, a0+span);
-    const h = (rrand()<.6 ? 1 : -1)*ARC_H*(.5 + .5*rrand())*(1 + .4*ring.strike)*Math.min(1, span/.25 + .4);
-    s.arcs.push(ringArch(a0/L, a1/L, h));
   }
 }
-function ringTips(L){
-  ring.tipNext = ringT + REGEN_MIN + rrand()*REGEN_VAR;
-  ring.tipArcs = [];
-  for (let i=0;i<2;i++){
-    const span = .08 + rrand()*.12, h = (rrand()<.5 ? 1 : -1)*ARC_H*(.5 + .4*rrand());
-    ring.tipArcs.push(ringArch(Math.max(0, 1 - span/L), 1, h));
+// desvío de la hebra principal en u, interpolado entre sus puntos
+function mainAt(u){
+  const f = Math.max(0, Math.min(1, u))*(mainN - 1), j = Math.min(mainN - 2, Math.floor(f));
+  return mainD[j] + (mainD[j+1] - mainD[j])*(f - j);
+}
+
+// Lo que dispara la partida: la llegada de los orbes hace tragar a la punta, y
+// el cierre la rodea entera. Nada en px: resize() no migra nada.
+function ringGulp(){
+  ringGulpT = ringT; ringStrike = Math.min(1, ringStrike + .25);
+  const [x,y] = gaugeTip(gaugeV);
+  ringSparks(6, x, y, SPARK_SPEED);
+}
+function ringClose(){ const [x,y] = gaugeTip(gaugeV); ringSparks(18, x, y, SPARK_CLOSE); }
+function ringSparks(n, x, y, sp){
+  for (let k=0;k<n;k++){
+    const i = spkI; spkI = (spkI + 1) % SPARK_MAX;
+    const a = rrand()*TAU, v = sp*(.4 + .6*rrand());
+    spkX[i] = x; spkY[i] = y; spkVX[i] = Math.cos(a)*v; spkVY[i] = Math.sin(a)*v;
+    spkT0[i] = ringT; spkLife[i] = .25 + .2*rrand();
   }
 }
 
-// trazado: una forma [u,d] del arco cargado hasta a1, o un arco del tubo
-function ringPath(P, a1){
-  const L = a1 - GAUGE_A0;
-  cx.beginPath();
-  for (const [u,d] of P){ const a = GAUGE_A0 + u*L, r = gaugeRad + d*PS; cx.lineTo(ox + Math.cos(a)*r, oy + Math.sin(a)*r); }
-}
-function ringArc(a0, a1){ cx.beginPath(); cx.arc(ox, oy, gaugeRad, a0, a1); }
-// repasa el trazado vigente: grosor en PS; op "lighter" (+), "multiply" (×) o normal
-function ringStroke(lw, col, a, op){
-  cx.globalCompositeOperation = op || "source-over";
-  cx.lineWidth = PS*lw;
-  cx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${Math.min(1,a)})`;
-  cx.stroke();
-}
-function ringGlow(x, y, r, stops){
-  const g = cx.createRadialGradient(x, y, 0, x, y, r);
-  for (const [o,c,a] of stops) g.addColorStop(o, `rgba(${c[0]},${c[1]},${c[2]},${a})`);
-  cx.globalCompositeOperation = "source-over";
-  cx.fillStyle = g; cx.beginPath(); cx.arc(x, y, r, 0, TAU); cx.fill();
-}
-// Halo del arco cargado, sin escalones: tres trazos concéntricos de ancho fijo
-// sumaban bandas de borde duro. Es un degradado radial continuo, con perfil
-// 1 − smoothstep hasta HALO_H del tubo, sobre el sector cargado, más un remate
-// redondo del mismo perfil en cada extremo. Sector y remates se reparten el plano
-// en cuñas desde el centro —cada remate, su mitad del hueco—, así que nada se
-// suma dos veces, tampoco con el anillo casi cerrado.
-const HALO_H = 0.08;                  // semiancho del halo, en PS
-function ringHalo(a1, peak){
-  const h = PS*HALO_H, G = RING_G, stops = [];
-  for (let i=0;i<=8;i++){ const x = i/8; stops.push([x, `rgba(${G[0]},${G[1]},${G[2]},${peak*(1 - x*x*(3 - 2*x))})`]); }
-  cx.globalCompositeOperation = "lighter";
-  let g = cx.createRadialGradient(ox, oy, gaugeRad - h, ox, oy, gaugeRad + h);
-  for (const [x,c] of stops){ g.addColorStop(.5 - x/2, c); g.addColorStop(.5 + x/2, c); }
-  cx.fillStyle = g;
-  cx.beginPath(); cx.arc(ox, oy, gaugeRad + h, GAUGE_A0, a1); cx.arc(ox, oy, gaugeRad - h, a1, GAUGE_A0, true); cx.fill();
-  const mid = (a1 + GAUGE_A0 + TAU)/2;
-  for (const [a, w0, w1] of [[a1, a1, mid], [GAUGE_A0, mid, GAUGE_A0 + TAU]]){
-    const x = ox + Math.cos(a)*gaugeRad, y = oy + Math.sin(a)*gaugeRad;
-    g = cx.createRadialGradient(x, y, 0, x, y, h);
-    for (const [s,c] of stops) g.addColorStop(s, c);
-    cx.save();
-    cx.beginPath(); cx.moveTo(ox, oy); cx.arc(ox, oy, gaugeRad + 2*h, w0, w1); cx.clip();
-    cx.fillStyle = g; cx.beginPath(); cx.arc(x, y, h, 0, TAU); cx.fill();
-    cx.restore();
+// Cachés que dependen de PS, ox, oy y DPR. El halo es un degradado radial
+// centrado en la esfera, con perfil 1 − smoothstep a cada lado del tubo; sus
+// remates, medios discos del mismo perfil, funden los extremos del sector en vez
+// de cortarlos. La luz blanca es la de orbes, chispas y destellos: no es un
+// disco, cae enseguida y deja una cola larga.
+let haloGrad, capSpr, anchorSpr, lightSpr;
+function bakeRing(){
+  const h = PS*HALO_H;
+  haloGrad = cx.createRadialGradient(ox, oy, gaugeRad - h, ox, oy, gaugeRad + h);
+  for (let i=0;i<=8;i++){
+    const x = i/8, c = ballRgb(RING_G, 1 - x*x*(3 - 2*x));
+    haloGrad.addColorStop(.5 - x/2, c); haloGrad.addColorStop(.5 + x/2, c);
   }
+  // remate: el lado plano en x = 0, el redondo hacia +x
+  const hd = Math.max(1, Math.ceil(h*DPR)), o = bgCanvas(hd, 2*hd), x = o.getContext("2d");
+  const im = x.createImageData(hd, 2*hd), d = im.data;
+  for (let j=0;j<2*hd;j++) for (let i=0;i<hd;i++){
+    const r = Math.min(1, Math.hypot(i + .5, j + .5 - hd)/(h*DPR)), n = 4*(j*hd + i);
+    d[n] = RING_G[0]; d[n+1] = RING_G[1]; d[n+2] = RING_G[2]; d[n+3] = Math.round(255*(1 - r*r*(3 - 2*r)));
+  }
+  x.putImageData(im, 0, 0); capSpr = o;
+  anchorSpr = ringLight(2*.9*CELL*.45, RING_G, [[0,1], [.3,.6], [.65,.18], [1,0]]);
+  lightSpr  = ringLight(3.6*CELL*.45, [255,255,255], [[0,1], [.14,1], [.3,.45], [.6,.12], [1,0]]);
+}
+function ringLight(d, c, stops){
+  const [o, x] = ballCanvas(d);
+  ballDisc(x, 0, 0, d/2, ballGrad(x, 0, 0, 0, 0, 0, d/2, stops.map(([s,a]) => [s, ballRgb(c, a)])));
+  return o;
 }
 
-// No pulsa: es progreso, no alarma. Las descargas son textura del rayo, no avisan
-// de nada.
+// trazado de una forma [u,d] sobre el arco cargado de La rad
+function ringPt(u, d, La, move){
+  const a = GAUGE_A0 + u*La, r = gaugeRad + d*PS, x = ox + Math.cos(a)*r, y = oy + Math.sin(a)*r;
+  if (move) cx.moveTo(x, y); else cx.lineTo(x, y);
+}
+function ringLine(D, n, La){ cx.beginPath(); for (let j=0;j<n;j++) ringPt(j/(n-1), D[j], La, !j); }
+// remate del halo en el ángulo a del aro, mirando hacia `dir`
+function ringEnd(a, dir){
+  const h = capSpr.width/DPR;
+  cx.save();
+  cx.translate(ox + Math.cos(a)*gaugeRad, oy + Math.sin(a)*gaugeRad); cx.rotate(dir);
+  cx.drawImage(capSpr, 0, -h, h, 2*h);
+  cx.restore();
+}
+
+// No pulsa: es progreso, no alarma. El brillo sube solo con lo que llega.
 function drawGauge(){
   if (!gaugeOn()) return;   // sin carga disponible el anillo no existe
-  const G = RING_G, GLO = RING_GLO, CORE = RING_CORE, FLARE = [228,255,170];
-  const st = ring.strike, K = ENERGY_K*(1 + .9*st), K1 = Math.min(1, K);
+  const p = Math.max(0, Math.min(1, gaugeVd/GAUGE_MAX));
+  if (p <= .002 || !mainN) return;
+  // horario desde las 9: pasa por arriba y cierra en el punto de partida
+  const La = p*TAU, a1 = GAUGE_A0 + La, K = 1 + .5*ringStrike, w = PS*RING_W, h = PS*HALO_H;
   cx.save();
   cx.lineCap = cx.lineJoin = "round";
-  const p = Math.max(0, Math.min(1, gaugeV/GAUGE_MAX));
-  if (p > 0.002){
-    // horario desde las 9: pasa por arriba y cierra en el punto de partida
-    const a1 = GAUGE_A0 + p*TAU, L = a1 - GAUGE_A0;
-    // halo y tubo
-    ringHalo(a1, .213*K);
-    ringArc(GAUGE_A0, a1);
-    ringStroke(.018, G,   .495*K, "lighter");
-    ringStroke(.006, GLO, .45*K,  "lighter");
-    ringStroke(.022, [150,235,170], .055, "multiply");
-    ringStroke(.016, G,   .06*K1);
-    ringStroke(.005, GLO, .055*K1);
-    // hebras, cada una con sus arcos
-    ring.strands.forEach((s, i)=>{
-      if (!s.pts || ringT >= s.next) ringStrand(s, i, L);
-      const k = s.int*K, k1 = Math.min(1, k), w = s.w;
-      ringPath(s.pts, a1);
-      ringStroke(.0298*w, G, .268*k, "lighter");
-      ringStroke(.011*w,  G, .81*k,  "lighter");
-      ringStroke(.011*w,  RING_GD, .055*k1);
-      ringStroke(.008*w,  G,    .095*k1);
-      ringStroke(.0044*w, CORE, .995*k1);
-      for (const f of s.arcs){
-        ringPath(f, a1);
-        ringStroke(.0158, G, .212*k, "lighter");
-        ringStroke(.006,  G, .63*k,  "lighter");
-        ringStroke(.0055, G,    .085*k1);
-        ringStroke(.0024, CORE, .92*k1);
-      }
-    });
-    // descarga
-    if (st > .05){ ringArc(GAUGE_A0, a1); ringStroke(.05, FLARE, .337*st, "lighter"); }
-    // punta
-    const tx = ox + Math.cos(a1)*gaugeRad, ty = oy + Math.sin(a1)*gaugeRad;
-    const pr = PS*(.0495 + .02*st)*(.9 + .1*Math.sin(ringT*23));
-    ringGlow(tx, ty, 1.8*pr, [[0,CORE,.905], [.3,GLO,.75], [1,G,0]]);
-    ringGlow(tx, ty, .6*pr, [[0,CORE,.1], [1,G,0]]);
-    if (ringT >= ring.tipNext) ringTips(L);
-    for (const f of ring.tipArcs){
-      ringPath(f, a1);
-      ringStroke(.012,  G, .27, "lighter");
-      ringStroke(.005,  G,    .085);
-      ringStroke(.0025, CORE, .92);
-    }
-    // ancla: con el contador vacío no se pinta nada
-    ringGlow(ox - gaugeRad, oy, PS*.024, [[0,GLO,.9], [1,G,0]]);
+  // halo: el sector cargado y un remate en cada extremo
+  cx.globalAlpha = Math.min(1, .4*K);
+  cx.fillStyle = haloGrad;
+  cx.beginPath(); cx.arc(ox, oy, gaugeRad + h, GAUGE_A0, a1); cx.arc(ox, oy, gaugeRad - h, a1, GAUGE_A0, true); cx.fill();
+  ringEnd(a1, a1 + Math.PI/2); ringEnd(GAUGE_A0, GAUGE_A0 - Math.PI/2);
+  // hebra principal: cuerpo verde y alma blanca
+  cx.globalAlpha = 1;
+  ringLine(mainD, mainN, La);
+  cx.strokeStyle = RING_GS; cx.lineWidth = 2*w; cx.stroke();
+  cx.strokeStyle = RING_WS; cx.lineWidth = .6*w; cx.stroke();
+  // hebra fina y arcos, en una sola ruta. La onda va en PS de arco: fluye con
+  // el reloj y no se estira al crecer la carga
+  const kw = TAU*La*GAUGE_RAD/.065, tw = 7*ringTd;
+  cx.beginPath();
+  for (let j=0;j<fineN;j++){
+    const u = j/(fineN - 1);
+    ringPt(u, fineD[j] + .0065*Math.sin(Math.PI*u)*Math.sin(kw*u - tw), La, !j);
   }
-  // cierre: descarga sobre la circunferencia completa
-  if (gaugeFlashT > 0){ ringArc(0, TAU); ringStroke(.05, FLARE, .54*gaugeFlashT/GAUGE_FLASH, "lighter"); }
+  for (let n=0;n<arcN*ARC_PTS;n++) ringPt(arcU[n], arcD[n], La, !(n % ARC_PTS));
+  cx.globalAlpha = Math.min(1, .9*K); cx.strokeStyle = RING_GS; cx.lineWidth = 1.2*w; cx.stroke();
+  cx.globalAlpha = .75;               cx.strokeStyle = RING_WS; cx.lineWidth = .4*w;  cx.stroke();
+  // ancla: con el contador vacío no se pinta nada
+  cx.globalAlpha = .9; sprite(anchorSpr, ox - gaugeRad, oy, 1);
   cx.restore();
+}
+
+// La capa de encima de las bolas, antes de los flotantes: orbes, cierre, punta
+// y chispas. Todo en blanco salvo el cierre.
+function drawRingTop(){
+  if (!gaugeOn()) return;
+  const rt = ringTd, rad = CELL*.45, p = Math.max(0, Math.min(1, gaugeVd/GAUGE_MAX));
+  const a1 = GAUGE_A0 + p*TAU, tx = ox + Math.cos(a1)*gaugeRad, ty = oy + Math.sin(a1)*gaugeRad;
+  cx.save();
+  // cierre: la circunferencia entera con el perfil del halo y un filo blanco
+  if (gaugeFlashT > 0){
+    cx.globalAlpha = .9*gaugeFlashT/GAUGE_FLASH;
+    cx.beginPath(); cx.arc(ox, oy, gaugeRad, 0, TAU);
+    cx.strokeStyle = haloGrad; cx.lineWidth = 2*PS*HALO_H; cx.stroke();
+    cx.strokeStyle = RING_WS;  cx.lineWidth = .005*PS;     cx.stroke();
+  }
+  for (const o of orbs)
+    drawCharge(ox + o.x*PS, oy + o.y*PS, tx, ty, a1, FLASH_TIME + lerp(o.a0, o.age, ringAlpha), rad);
+  if (p > .002 && mainN) drawTip(p, rt);
+  for (let i=0;i<SPARK_MAX;i++){
+    if (!spkLife[i]) continue;
+    const e = Math.max(0, rt - spkT0[i]), u = e/spkLife[i], k = e*(1 - .5*u);
+    if (u >= 1) continue;
+    cx.globalAlpha = 1 - u;
+    sprite(lightSpr, ox + (spkX[i] + spkVX[i]*k)*PS, oy + (spkY[i] + spkVY[i]*k)*PS, .04*PS*(1 - u)/lightSpr.d);
+  }
+  cx.restore();
+}
+
+// Una bola que carga, del destello a la punta, en el instante `tau`: s desde que
+// empieza a destellar, con un solo reloj para el pop (ver popFx()) y el orbe.
+// Hasta FLASH_TIME está quieta en su sitio; luego vuela en ORB_TRIP de (x0, y0) a
+// la punta (tx, ty), que avanza: la curva se recalcula en cada frame. Tres
+// fases del mismo reloj:
+//  - w: se funde a blanco en ORB_WHITE, con un disco que tapa la bola entera,
+//    borde incluido;
+//  - e: el camino, con salida rápida y frenada al llegar (1 − (1 − u)²). Una
+//    cuadrática que entra en la punta siguiendo el anillo;
+//  - q: de bola blanca a luz, hecha a ORB_LIGHT del camino. El disco encoge
+//    opaco y al final se funde en la luz, que entra con su estela de cometa.
+function drawCharge(x0, y0, tx, ty, a1, tau, rad){
+  const w = bgSst(0, ORB_WHITE, tau), u = Math.max(0, Math.min(1, (tau - FLASH_TIME)/ORB_TRIP));
+  const dist = Math.hypot(tx - x0, ty - y0);
+  const x1 = tx + Math.sin(a1)*.5*dist, y1 = ty - Math.cos(a1)*.5*dist;
+  for (let j=0;j<ORB_N;j++){
+    const v = Math.max(0, u - j*.04), e = 1 - (1 - v)*(1 - v), m = 1 - e;
+    orbX[j] = m*m*x0 + 2*m*e*x1 + e*e*tx;
+    orbY[j] = m*m*y0 + 2*m*e*y1 + e*e*ty;
+  }
+  const q = bgSst(0, ORB_LIGHT, 1 - (1 - u)*(1 - u)), od = 3*rad*(1.2 - .55*u);
+  if (q < 1){
+    cx.globalAlpha = w*(1 - bgSst(.75, 1, q)); cx.fillStyle = RING_WS;
+    cx.beginPath(); cx.arc(orbX[0], orbY[0], (rad*BALL_R0K + .5)*(1 - .8*q), 0, TAU); cx.fill();
+  }
+  if (u > 0){
+    const g = cx.createLinearGradient(orbX[0], orbY[0], orbX[ORB_N-1], orbY[ORB_N-1]);
+    g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    cx.fillStyle = g;
+    orbTrail(.16*od);  cx.globalAlpha = .35*q; cx.fill();
+    orbTrail(.055*od); cx.globalAlpha = .95*q; cx.fill();
+    cx.globalAlpha = q; sprite(lightSpr, orbX[0], orbY[0], od/lightSpr.d);
+  }
+  cx.globalAlpha = 1;
+}
+// relleno que se afila hasta cero en la cola: un lado de ida y el otro de vuelta
+function orbTrail(hw){
+  cx.beginPath();
+  for (let j=0;j<ORB_N;j++) trailSide(orbX, orbY, ORB_N, j, hw*Math.pow(1 - j/(ORB_N-1), .9), !j);
+  for (let j=ORB_N-1;j>=0;j--) trailSide(orbX, orbY, ORB_N, j, -hw*Math.pow(1 - j/(ORB_N-1), .9), false);
+}
+// punto j de una polilínea desplazado `off` px por su normal
+function trailSide(X, Y, n, j, off, move){
+  const a = Math.max(0, j-1), b = Math.min(n-1, j+1), fx = X[b] - X[a], fy = Y[b] - Y[a];
+  const l = Math.hypot(fx, fy), k = l > 1e-3 ? off/l : 0, x = X[j] - fy*k, y = Y[j] + fx*k;
+  if (move) cx.moveTo(x, y); else cx.lineTo(x, y);
+}
+
+// Punta: la hebra principal se abulta en su último tramo —no es una pieza
+// aparte—, de verde a blanco, con un halo redondo que no parpadea. Al tragar un
+// orbe crece (`gulp`) y suelta un destello.
+function drawTip(p, rt){
+  const La = p*TAU, Lps = La*GAUGE_RAD, w = PS*RING_W, n = TIP_N - 1;
+  const gulp = Math.max(0, Math.min(1, 1 - GULP_DECAY*(rt - ringGulpT)));
+  const k = 1 + .35*gulp + .15*ringStrike, us = 1 - Math.min(.095, .6*Lps)/Lps;
+  for (let j=0;j<=n;j++){
+    const u = us + (1 - us)*j/n, a = GAUGE_A0 + u*La, r = gaugeRad + mainAt(u)*PS;
+    tipX[j] = ox + Math.cos(a)*r; tipY[j] = oy + Math.sin(a)*r;
+  }
+  const x = tipX[n], y = tipY[n], hr = .05*PS*k, w1 = 3.1*w*k;
+  let g = cx.createRadialGradient(x, y, 0, x, y, hr);
+  g.addColorStop(0, "rgba(255,255,255,1)");  g.addColorStop(.3, "rgba(255,255,255,.85)");
+  g.addColorStop(.6, "rgba(255,255,255,.3)"); g.addColorStop(1, "rgba(255,255,255,0)");
+  cx.globalAlpha = 1; cx.fillStyle = g;
+  cx.beginPath(); cx.arc(x, y, hr, 0, TAU); cx.fill();
+  // semiancho de 1w a 3,1w·k con perfil t², y remate redondo delante
+  g = cx.createLinearGradient(tipX[0], tipY[0], x, y);
+  g.addColorStop(0, RING_GS); g.addColorStop(.5, RING_WS); g.addColorStop(1, RING_WS);
+  cx.fillStyle = g;
+  cx.beginPath();
+  for (let j=0;j<=n;j++){ const t = j/n; trailSide(tipX, tipY, TIP_N, j, w + (w1 - w)*t*t, !j); }
+  const f = Math.atan2(y - tipY[n-1], x - tipX[n-1]);
+  cx.arc(x, y, w1, f + Math.PI/2, f - Math.PI/2, true);
+  for (let j=n;j>=0;j--){ const t = j/n; trailSide(tipX, tipY, TIP_N, j, -(w + (w1 - w)*t*t), false); }
+  cx.fill();
+  if (gulp > 0){ cx.globalAlpha = gulp; sprite(lightSpr, x, y, .065*PS*(1 + gulp)/lightSpr.d); }
 }
 
 // `alpha` es la fracción de tick transcurrida desde el último: se dibuja entre el
@@ -3048,6 +3192,7 @@ function drawGauge(){
 function draw(alpha){
   angleDraw = lerp(angleD0, angle, alpha);
   const tv = t - (1 - alpha)*SIM_DT;   // reloj del dibujo, entre los dos ticks
+  ringAlpha = alpha; ringTd = ringT - (1 - alpha)*SIM_DT; gaugeVd = lerp(gaugeV0, gaugeV, alpha);
   // la matriz px CSS → buffer se repone en cada frame, no solo en resize(): el
   // navegador puede tirar el contexto de una pestaña que lleva rato en segundo
   // plano y devolverlo con el estado a cero, sin resize. Con la matriz identidad
@@ -3086,12 +3231,12 @@ function draw(alpha){
   for (let r=0;r<N;r++) for (let c=0;c<N;c++){
     const b = grid[idx(c,r)]; if (!b || b.k<0) continue;   // el bulto del fondo ya lleva la suya
     const [x,y] = cellToScreen(b.vc===undefined?c:b.vc, b.vr===undefined?r:b.vr);
-    drawShadow(x, y, flashT>0 && flashSet.has(idx(c,r)) ? popR(rad) : rad, 0);
+    drawShadow(x, y, flashT>0 && flashSet.has(idx(c,r)) ? popShadowR(rad) : rad, 0);
   }
   if (deadBall){ const [x,y] = cellToScreen(deadBall.vc, deadBall.vr); drawShadow(x, y, rad, 0); }
   if (outBall){
     const [x,y] = cellToScreen(outBall.vc, outBall.vr);
-    drawShadow(x, y, flashT>0 && flashSet.has(OUT) ? popR(rad) : rad, 0);
+    drawShadow(x, y, flashT>0 && flashSet.has(OUT) ? popShadowR(rad) : rad, 0);
   }
   const born = flying.map(b => bornScale(b, tv));
   flying.forEach((b, i) => drawShadow(fly[i][0], fly[i][1], (b.bonus ? rad*1.05 : rad)*born[i], LIFT_FLY));
@@ -3141,19 +3286,32 @@ function draw(alpha){
     ballDisc(cx, x, y, rad*.55, ballGrad(cx, x, y, 0, x, y, rad*.55, [[0, ballRgb(C0, .22 + .22*Math.sin(t*9))], [1, ballRgb(C0, 0)]]));
     cx.restore();
   });
+  drawRingTop();
   drawFloaters();
 }
 // Pop: fundido rápido a blanco y ligero crecimiento antes de desaparecer. Pinta
 // el halo, la bola al radio del pop y encima el blanco que la funde.
+// El match que carga el anillo no estalla: se enciende y se va con su orbe. Su
+// dibujo es el del orbe en su primer tramo (ver drawCharge()); aquí solo queda
+// la bola debajo hasta que el blanco la tapa, y la sombra, que se va con ella.
 function popE(){ const p = 1 - flashT/FLASH_TIME; return p*p*(3-2*p); }   // 0 → 1, suavizado
+function popCharges(){ return !flashBonus && gaugeOn(); }
 function popR(rad){ return rad*(1 + 0.30*popE()); }
+function popShadowR(rad){ return popCharges() ? rad*(1 - bgSst(0, ORB_WHITE, FLASH_TIME - flashT)) : popR(rad); }
 function popFx(k, x, y, rad){
-  const e = popE(), rr = popR(rad);
+  const e = popE();
   cx.save();
   cx.globalAlpha = 0.55*(1-e);
   cx.beginPath(); cx.arc(x,y,rad*(1.2+1.1*e),0,7);
   cx.fillStyle = "#ffffff"; cx.fill();
   cx.restore();
+  if (popCharges()){
+    const tau = Math.max(0, FLASH_TIME - flashT - (1 - ringAlpha)*SIM_DT);   // interpolado, como el orbe
+    if (tau < ORB_WHITE) drawBall(k, x, y, rad);
+    drawCharge(x, y, x, y, 0, tau, rad);
+    return;
+  }
+  const rr = popR(rad);
   drawBall(k, x, y, rr);
   cx.globalAlpha = Math.min(1, e*1.35);
   cx.beginPath(); cx.arc(x, y, rr*.9, 0, TAU); cx.fillStyle = "#ffffff"; cx.fill();
@@ -3261,16 +3419,20 @@ function updateGame(dt){
       if (whiteT <= 0){ spawnWhite(); whiteT = whiteInterval(); }
     }
 
-    // el anillo persigue al valor lógico: commitFlash() suma de golpe, y un salto
-    // instantáneo de 60° es un parpadeo, no una recompensa.
-    gaugeV += (gauge - gaugeV)*Math.min(1, GAUGE_TWEEN*dt);
+    // el anillo persigue a lo que han traído los orbes (ver launchOrbs()): llegan
+    // a golpes, y un salto instantáneo es un parpadeo, no una recompensa.
+    stepOrbs(dt);
+    gaugeV += (gaugeL - gaugeV)*Math.min(1, GAUGE_TWEEN*dt);
     if (gaugeFlashT > 0) gaugeFlashT -= dt;
-    // el bonus espera a que el arco haya cerrado el anillo, no a que el contador
-    // llegue al tope: disparar con gaugeV a medias rompe la relación que busca el aro.
-    if (gaugeOn() && gauge >= GAUGE_MAX && gaugeV >= GAUGE_MAX-3){
+    // el bonus espera a que el último orbe haya cerrado el arco, no a que el
+    // contador llegue al tope: disparar con el aro a medias rompe la relación que
+    // busca. Los orbes que sigan en vuelo pasan a la época anterior.
+    if (gaugeOn() && gauge >= GAUGE_MAX && gaugeL >= GAUGE_MAX && gaugeV >= GAUGE_MAX-3){
       gaugeFlashT = GAUGE_FLASH;
       spawnBonus();
-      gauge = 0;                 // gaugeV baja sola: el anillo se vacía barriendo
+      ringClose();
+      gauge = gaugeL = 0;        // gaugeV baja sola: el anillo se vacía barriendo
+      gaugeEpoch++;
     }
 
     stepFlying(dt);
@@ -3290,10 +3452,11 @@ function updateGame(dt){
 // No se reutilizan anglePrev ni b.px/b.py: esos solo avanzan con la partida viva,
 // y tras morir el dibujo temblaría entre dos valores. Esto se copia en todos los
 // ticks, viva o no. Una ficha nacida en el tick no tiene copia y se dibuja donde está.
-let angleD0 = 0;
+let angleD0 = 0, gaugeV0 = 0;
 function captureDrawPrev(){
-  angleD0 = angle;
+  angleD0 = angle; gaugeV0 = gaugeV;
   for (const b of flying){ b.dx0 = b.x; b.dy0 = b.y; }
+  for (const o of orbs) o.a0 = o.age;
 }
 
 // ─── medidor de fps (temporal, fase de optimización) ───
