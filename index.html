@@ -1771,6 +1771,7 @@ function commitFlash(){
   const cm = comboMult();
   const chained = comboDepth > 0 && cascadeF;
   let first = null;                  // texto del primer eslabón, por si hay cadena
+  popBurst(flashSet);                // antes de vaciar nada: lee dónde se ven las bolas
 
   if (flashBonus){
     const pts = flashSet.size*5;
@@ -2564,7 +2565,8 @@ const F_BG = 0, F_TR = 1, F_TRH = 2;
 const BUB_LW = [.8, .9, .9];
 let bubCv, bubN = 0, bubSx, bubSy, bubSw, bubDw, bubRb;
 function bakeBubs(){
-  const rMax = Math.max(BUB_R0, .018*1.4*PS);   // radio máximo de la estela
+  // radio máximo: la estela, o la chispa más gorda del pop al apagarse
+  const rMax = Math.max(BUB_R0, Math.max(.018*1.4, POP_R1*1.35)*PS);
   bubN = Math.ceil(Math.log(rMax/BUB_R0)/Math.log(BUB_STEP)) + 1;
   bubSx = new Float32Array(3*bubN); bubSy = new Float32Array(3*bubN);
   bubSw = new Float32Array(3*bubN); bubDw = new Float32Array(3*bubN); bubRb = new Float32Array(3*bubN);
@@ -2963,7 +2965,20 @@ const trX = new Float32Array(BUB_TRAIL_MAX), trY = new Float32Array(BUB_TRAIL_MA
       trVx = new Float32Array(BUB_TRAIL_MAX), trVy = new Float32Array(BUB_TRAIL_MAX),
       trR = new Float32Array(BUB_TRAIL_MAX), trLife = new Float32Array(BUB_TRAIL_MAX),
       trAge = new Float32Array(BUB_TRAIL_MAX);
+// Tipo de cada hueco. 0: estela, en mundo y PS. 1: chispa del pop, en celda
+// —trX/trY son fc/fr y la velocidad va en celdas/s—, para que gire con el
+// tablero y se quede donde estaba la bola; trR sigue en PS. `trD` es la
+// amortiguación por tick de cada chispa; la estela usa siempre .96.
+const trK = new Uint8Array(BUB_TRAIL_MAX), trD = new Float32Array(BUB_TRAIL_MAX);
 let trailHead = 0, trailN = 0;
+// el siguiente hueco del anillo; lleno, pisa a la más antigua
+function trailSlot(kind){
+  const j = trailHead;
+  trK[j] = kind;
+  trailHead = (j + 1) % BUB_TRAIL_MAX;
+  if (trailN < BUB_TRAIL_MAX) trailN++;
+  return j;
+}
 // tras stepFlying(): la velocidad sale del avance del tick, así que vale igual
 // para radiales, sinusoides y la espiral de la especial
 function emitTrail(dt){
@@ -2972,26 +2987,83 @@ function emitTrail(dt){
     const vx = (b.x - b.px)/dt, vy = (b.y - b.py)/dt;
     const n = b.hard ? BUB_TRAIL_HARD : BUB_TRAIL_N;
     for (let i=0;i<n;i++){
-      const kv = .05 + prand()*.1, j = trailHead;
+      const kv = .05 + prand()*.1, j = trailSlot(0);
       trX[j] = b.x + (prand()-.5)*rad; trY[j] = b.y + (prand()-.5)*rad;
       trVx[j] = -vx*kv + (prand()-.5)*.05; trVy[j] = -vy*kv + (prand()-.5)*.05;
       trR[j] = b.hard ? .006 + prand()*.012 : .004 + prand()*.008;
       trLife[j] = .45 + prand()*.45; trAge[j] = 0;
-      trailHead = (j + 1) % BUB_TRAIL_MAX;
-      if (trailN < BUB_TRAIL_MAX) trailN++;
     }
   }
 }
+
+// Explosión del pop: comparte el anillo con la estela, pero no su PRNG. Usa
+// `xrand`, para que la estela del vuelo siga gastando `prand` igual que antes.
+// Nace en updateGame(), nunca desde el dibujo.
+const xrand = mulberry32(0xb1a57);
+// Cada bola que estalla, por match o por bomba, suelta un puñado de burbujas
+// hacia fuera, algo sesgadas hacia el borde del cuenco. La bomba es la suma de
+// sus bolas; el presupuesto por commit reparte POP_BUDGET entre todas y deja
+// sitio a la estela viva. Nacen con un retardo (edad negativa) que las
+// desgrana sin temporizador aparte.
+// Con un solo frenado, todas dibujaban el mismo "sale de golpe y se para" y
+// cada pop parecía la misma animación. Ahora varía todo lo que da forma: el
+// número por bola, el frenado (unas se quedan junto a la bola, otras viajan
+// hasta ~2,5 celdas), la velocidad, el retardo y el radio, este con la
+// distribución al cuadrado: casi todas pequeñas y alguna gorda.
+const POP_SPARKS0 = 5, POP_SPARKS1 = 9, POP_BUDGET = 160;   // por bola / por commit
+const POP_OUT = .35, POP_OFF = .25;            // peso del sesgo; desvío inicial, celdas
+const POP_V0 = 1.5, POP_V1 = 9;                // celdas/s
+const POP_DAMP0 = .86, POP_DAMP1 = .94;        // por tick
+const POP_R0 = .005, POP_R1 = .028;            // PS
+const POP_LIFE0 = .45, POP_LIFE1 = .9, POP_DELAY = .18, POP_IN = .12;
+function popBurst(set){
+  const cap = Math.floor(POP_BUDGET/set.size);
+  for (const i of set){
+    const g = i===OUT ? outBall : grid[i]; if (!g) continue;
+    const fc = g.vc ?? i%N, fr = g.vr ?? (i/N)|0;
+    const dx = fc - C, dy = fr - C, dl = Math.hypot(dx, dy);
+    const bx = dl ? POP_OUT*dx/dl : 0, by = dl ? POP_OUT*dy/dl : 0;
+    const n = Math.max(2, Math.min(cap, POP_SPARKS0 + Math.floor(xrand()*(POP_SPARKS1 - POP_SPARKS0 + 1))));
+    for (let m=0;m<n;m++){
+      const a = xrand()*TAU;
+      let ux = Math.cos(a) + bx, uy = Math.sin(a) + by;
+      const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+      const off = xrand()*POP_OFF, v = POP_V0 + xrand()*(POP_V1 - POP_V0), j = trailSlot(1);
+      trX[j] = fc + ux*off; trY[j] = fr + uy*off;
+      trVx[j] = ux*v; trVy[j] = uy*v;
+      trD[j] = POP_DAMP0 + xrand()*(POP_DAMP1 - POP_DAMP0);
+      const q = xrand();
+      trR[j] = POP_R0 + q*q*(POP_R1 - POP_R0);
+      trLife[j] = POP_LIFE0 + xrand()*(POP_LIFE1 - POP_LIFE0);
+      trAge[j] = -xrand()*POP_DELAY;
+    }
+  }
+}
+
+// la edad negativa es retardo: corre, pero la burbuja ni se mueve ni se pinta
 function stepTrail(dt){
   for (let n=0, j=(trailHead - trailN + BUB_TRAIL_MAX) % BUB_TRAIL_MAX; n<trailN; n++, j=(j+1) % BUB_TRAIL_MAX){
     if (trAge[j] >= trLife[j]) continue;
-    trAge[j] += dt; trX[j] += trVx[j]*dt; trY[j] += trVy[j]*dt; trVx[j] *= .96; trVy[j] *= .96;
+    trAge[j] += dt;
+    if (trAge[j] < 0) continue;
+    const d = trK[j] ? trD[j] : .96;
+    trX[j] += trVx[j]*dt; trY[j] += trVy[j]*dt; trVx[j] *= d; trVy[j] *= d;
   }
 }
-// de la más antigua a la más nueva, como antes
-function drawTrail(){
+// De la más antigua a la más nueva, como antes. Dos pasadas: `top` falso pinta
+// la estela, debajo de las bolas; verdadero, las chispas del pop, encima.
+function drawTrail(top){
+  const kind = top ? 1 : 0, s = Math.sin(angleDraw), co = Math.cos(angleDraw);
   for (let n=0, j=(trailHead - trailN + BUB_TRAIL_MAX) % BUB_TRAIL_MAX; n<trailN; n++, j=(j+1) % BUB_TRAIL_MAX){
-    if (trAge[j] >= trLife[j]) continue;
+    if (trK[j] !== kind || trAge[j] < 0 || trAge[j] >= trLife[j]) continue;
+    if (top){
+      // entra con rebote y crece al apagarse; cellToScreen() escrita en línea
+      const p = trAge[j]/trLife[j], q = Math.min(1, p/POP_IN) - 1;
+      const r = trR[j]*PS*(.4 + .6*(1 + 2.2*q*q*q + 1.2*q*q))*(1 + .35*p);
+      const lx = (trX[j] - C)*CELL, ly = (trY[j] - C)*CELL;
+      drawBub(r > 2 ? F_TRH : F_TR, ox + lx*co - ly*s, oy + lx*s + ly*co, r, p < .5 ? 1 : 2 - 2*p);
+      continue;
+    }
     const k = 1 - trAge[j]/trLife[j];
     const r = Math.max(.6, trR[j]*PS*(.6 + .8*(1-k)));
     if (r > 2) drawBub(F_TRH, ox + trX[j]*PS, oy + trY[j]*PS, r, .8*k);
@@ -3355,7 +3427,7 @@ function draw(alpha){
   flying.forEach((b, i) => drawShadow(fly[i][0], fly[i][1], (b.bonus ? rad*1.05 : rad)*born[i], LIFT_FLY));
   cx.globalAlpha = 1;
 
-  drawTrail();
+  drawTrail(false);
 
   for (let r=0;r<N;r++) for (let c=0;c<N;c++){
     const b = grid[idx(c,r)]; if (!b || b.k<0) continue;   // la roca central es el bulto del fondo
@@ -3399,6 +3471,7 @@ function draw(alpha){
     ballDisc(cx, x, y, rad*.55, ballGrad(cx, x, y, 0, x, y, rad*.55, [[0, ballRgb(C0, .22 + .22*Math.sin(t*9))], [1, ballRgb(C0, 0)]]));
     cx.restore();
   });
+  drawTrail(true);       // las chispas del pop, sobre las bolas
   drawRingTop();
   drawFloaters();
 }

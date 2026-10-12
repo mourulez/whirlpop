@@ -33,8 +33,9 @@ orientativo: 80 líneas.
   `updateGame()`, a ticks fijos de `SIM_DT` (1/60); `draw(alpha)` interpola entre
   el tick anterior y el actual y no modifica nada de la partida. Los listeners de
   input solo tocan estado que el tick siguiente lee al empezar.
-- `Math.random` es solo de la partida. Cada efecto visual (fondo, rayo, estela)
-  tiene su PRNG con semilla fija (`vrand`, `rrand`, `prand`) y su reloj propio
+- `Math.random` es solo de la partida. Cada efecto visual (fondo, rayo, estela,
+  explosión del pop) tiene su PRNG con semilla fija (`vrand`, `rrand`, `prand`,
+  `xrand`) y su reloj propio
   avanza en `updateGame()` sin escribir estado de juego: gastarlo desde el dibujo
   cambiaría la partida.
 - Toda caché horneada en un canvas aparte se crea con `bgCanvas()` y se hornea
@@ -67,6 +68,8 @@ orientativo: 80 líneas.
 - La bomba es el único evento que sacude la cámara (y solo el tablero, no el
   fondo; nada con `prefers-reduced-motion`). No se añade shake a pops, combos,
   nivel ni game over sin decidirlo antes.
+- Las bolas que recoloca la gravedad no dejan estela: se probó la del hard drop
+  y casi no se notaba.
 - La carga llega al anillo con los orbes, no en el match: cada bola del match
   vuela a la punta y el arco crece al llegar; la bomba sale cuando lo cierra el
   último. Un solo gesto del destello a la punta (`drawCharge()`), todos a la vez
