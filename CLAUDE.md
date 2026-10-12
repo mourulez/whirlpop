@@ -80,6 +80,9 @@ orientativo: 80 líneas.
   último. Un solo gesto del destello a la punta (`drawCharge()`), todos a la vez
   y en `ORB_TRIP`. Se probó con salidas escalonadas, anticipación y ondas, y se
   descartó por poco fluido y por complejo.
+- El ángulo de salida se re-elige en el spawn para evitar la muerte súbita, sin
+  salir de la zona del aviso (color) ni de ±90° del opuesto (blancas); las
+  sinusoides no.
 - La bola que no cabe se juzga antes de morir (hueco liberado o match desde
   fuera), pero solo espera una a la vez: sin cola. La espera dura un destello y
   en 16.000 partidas no llegó nunca una segunda; si llega, muere sin juicio.

@@ -469,6 +469,13 @@ const STONE_WARN = 14, STONE_TIME = 34;   // 20 s de margen para reaccionar
 const STONE_REWIND = .4;                  // s que tarda en deshacerse un aviso entero tras un match de 2
 const TELEGRAPH = 1.25;                     // aviso previo a la salida de cada ficha
 const TELEGRAPH_ARC = 35 * Math.PI/180;     // amplitud del aviso
+// Muerte súbita (ver safeAngle()): por debajo de SUBITA_T una muerte prevista no
+// se puede ver venir. SAFE_STEP es el paso entre candidatos: en el borde una celda
+// son ~7,4° de arco, así que ~¼ de celda. WHITE_SAFE_SPREAD es el abanico total en
+// que se busca el de una blanca, con el mismo convenio que WHITE_SPREAD.
+const SUBITA_T = 0.6;
+const SAFE_STEP = 2 * Math.PI/180;
+const WHITE_SAFE_SPREAD = 180 * Math.PI/180;
 // Sinusoide: no es un tipo de ficha, es otra forma de llegar. Entra por un eje
 // cardinal y cruza el círculo serpenteando hasta el centro: la de vaivén vertical
 // por las 3 o las 9 (nivel 6), la de vaivén horizontal por las 12 o las 6 (nivel 7).
@@ -1150,10 +1157,86 @@ function pickNext(){
   const a = aArc + (Math.random()-0.5)*TELEGRAPH_ARC*0.82;   // dentro del arco
   return { aArc, a, k };
 }
+// Radio de salida de las radiales, en mundo: justo fuera del halo del arco de aviso.
+const SPAWN_D = 0.52;
+
+// ─── muerte súbita ─────────────────────────────────────────────────────────
+// La bola nace a SPAWN_D y la frontera del campo está a ~0.46, entre 1 y 1,5
+// celdas: si su radial choca con un montón sin hueco, muere en 0,3–0,45 s, por
+// debajo del tiempo de reacción y con la atención en otro sitio. Y el ángulo se
+// decidía antes de que el tablero llegara a donde está al salir: pickNext() lo
+// fija 1,25 s antes, y las blancas lo sortean sin mirar el montón.
+//
+// Así que se re-elige aquí, en el spawn, sin tocar nada visible: el color, dentro
+// del margen invisible que ya tenía dentro del arco (el aviso pinta `aArc`, no
+// `a`, así que la zona declarada se respeta por construcción); la blanca, a ±90°
+// del punto opuesto a la última de color, que sigue partiendo la atención. Las
+// sinusoides no pasan por aquí: su entrada está fija en un eje cardinal.
+//
+// Cada candidato se evalúa con una sonda que nace en él, con ghostPredict(): la
+// misma regla que el aterrizaje, nunca una copia, con el tablero congelado en
+// `angleT` y contando las celdas que ya reservan las bolas en vuelo. Antes se
+// refresca stepGhosts(): en el tick del spawn sus reservas son las del anterior,
+// y así una blanca que sale en el mismo tick que una de color ve la celda de
+// esta. Las dos son puras, y el final del tick las vuelve a calcular. Un
+// candidato vale si cabe, si el choque tarda al menos SUBITA_T —se ve venir y se
+// corrige girando— o, solo en color y si no hay ya una bola esperando fuera, si
+// desde su snap cerraría un match (rescueMatch()).
+//
+// Intervención mínima: los candidatos van por distancia al original, en pasos de
+// SAFE_STEP, alternando lados y siguiendo por uno cuando el otro se sale del
+// rango. Sale el primero que vale, así que si el original vale sale el original.
+// Si no vale ninguno la muerte es inevitable, y sale el que más tarda en chocar.
+// No gasta Math.random ni crea objetos: la partida sembrada solo cambia en los
+// spawns en que interviene.
+const probe = { x:0, y:0, sp:BUBBLE_SPEED, acc:FALL_ACCEL, hard:false, free:null, sine:null };
+function safeAngle(a0, mid, half, k){
+  stepGhosts();
+  const lo = mid - half - 1e-9, hi = mid + half + 1e-9;
+  const rescue = k !== WHITE && !outBall;
+  let best = a0, bestT = -1;
+  for (let i=0, more=true; more; i++){
+    more = false;
+    for (let s=0; s < (i ? 2 : 1); s++){
+      const a = a0 + (s ? -i : i)*SAFE_STEP;
+      if (a < lo || a > hi) continue;
+      more = true;
+      probe.x = Math.cos(a)*SPAWN_D; probe.y = Math.sin(a)*SPAWN_D;
+      ghostPredict(probe, occGhost);
+      if (gC >= 0 || gT >= SUBITA_T) return a;
+      if (rescue && gSeg.hit && rescueMatch(k, gSeg.slot[0], gSeg.slot[1])) return a;
+      if (gT > bestT){ bestT = gT; best = a; }
+    }
+  }
+  return best;
+}
+// ¿Cerraría un match la bola que muere en `sc,sr`? La regla de findPops() para la
+// bola de fuera: entra en los grupos de su color por adyacencia con su snap, que
+// puede caer fuera del array. Lo que ya destella no cuenta. No predice cascadas,
+// ni el hueco que puede liberar settleOut(), ni la colateral de blancas.
+const rsSeen = new Uint32Array(N*N), rsStack = new Int16Array(N*N);
+let rsStamp = 0;
+function rescueMatch(k, sc, sr){
+  rsStamp++;
+  let n = 1, m = 0, c = sc, r = sr;        // n: el grupo, contando la bola
+  for (;;){
+    for (const [dc,dr] of NB){
+      const p = c+dc, q = r+dr;
+      if (!inb(p,q)) continue;
+      const i = idx(p,q), h = grid[i];
+      if (rsSeen[i] === rsStamp || !h || h.k !== k || flashSet.has(i)) continue;
+      rsSeen[i] = rsStamp; rsStack[m++] = i;
+      if (++n >= CHAIN_MIN) return true;
+    }
+    if (!m) return false;
+    const i = rsStack[--m]; c = i%N; r = (i/N)|0;
+  }
+}
+
 // Las fichas nacen justo fuera del círculo, en la zona que acaba de marcar el
 // arco de aviso, y ya con su velocidad normal.
 function spawnNormal(n){
-  const a = n.a, d = 0.52;
+  const a = safeAngle(n.a, n.aArc, TELEGRAPH_ARC*0.82/2, n.k), d = SPAWN_D;
   const x = Math.cos(a)*d, y = Math.sin(a)*d;
   lastColorAngle = a;
   flying.push({ born:t, bonus:false, k:n.k, hard:false,
@@ -1193,7 +1276,7 @@ function sineAt(q, s, out=[]){
   return out;
 }
 function spawnSine(n){
-  const a = n.a, d = 0.52;
+  const a = n.a, d = SPAWN_D;
   const ex = Math.round(Math.cos(a)), ey = Math.round(Math.sin(a));
   const x = ex*d, y = ey*d;
   const A = SINE_AMP, w = Math.PI*n.cyc/d;
@@ -1208,8 +1291,8 @@ function spawnSine(n){
 // Sale en el lado opuesto a la última ficha de color, para partir la atención.
 function spawnWhite(){
   const base = (lastColorAngle===null ? Math.random()*Math.PI*2 : lastColorAngle) + Math.PI;
-  const a = base + (Math.random()-0.5)*WHITE_SPREAD;
-  const d = 0.52;
+  const a = safeAngle(base + (Math.random()-0.5)*WHITE_SPREAD, base, WHITE_SAFE_SPREAD/2, WHITE);
+  const d = SPAWN_D;
   const x = Math.cos(a)*d, y = Math.sin(a)*d;
   flying.push({ born:t, bonus:false, k:WHITE, hard:false,
                 x, y, px:x, py:y,
