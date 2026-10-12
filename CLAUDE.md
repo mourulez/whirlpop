@@ -40,6 +40,9 @@ orientativo: 80 líneas.
 - Toda caché horneada en un canvas aparte se crea con `bgCanvas()` y se hornea
   desde `bake()`: si la GPU se reinicia, Chrome devuelve los canvas vacíos y solo
   eso se rehornea. Se reproduce abriendo `chrome://gpucrash` en otra pestaña.
+  Se pinta 1:1 en px de dispositivo, recortada a lo que ocupa: con DPR
+  fraccionario, un canvas de `ceil(W·DPR)` pintado a `W` se reescala y se corre
+  medio píxel.
 - Cero peticiones externas (requisito Poki): fuente e imágenes van en el repo
   con ruta relativa, nada de CDN ni Google Fonts.
 
@@ -115,6 +118,9 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   `resize()`, pero eso no mueve el CSS (`vw`, HUD): para el layout, ventana real
   con `--window-size`. El viewport sale 16×95 px menor y nunca baja de 500 de ancho:
   para un móvil real, un `<iframe>` del tamaño exacto dentro de la página capturada.
+  `--dump-dom` no espera a los iframes: si la prueba carga varios (versión
+  antigua y nueva, una por tamaño), que mande el resultado por POST a un
+  servidor local. Redimensionar el iframe dispara el `resize` real.
 - El input se simula despachando `PointerEvent`/`KeyboardEvent` reales, con
   `performance.now` redefinido al reloj virtual: el arrastre mide con él.
   Una partida entera dibujando cada frame tarda ~20 s: lanzar lotes en segundo plano.

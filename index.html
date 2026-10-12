@@ -2487,7 +2487,7 @@ let flowW = FLOW_SPIN, flowDir = 1, flowPrev = 0;   // flowPrev: `angle` del tic
 // Cachés que dependen de R, CELL, ox, oy y DPR: se hornean en resize(). La luz
 // viene siempre de arriba a la izquierda.
 let lavaBaseCv, lavaBallCv;
-let lightsCv, bowlCv, bumpCv, bumpD;
+let arenaCv, arenaX, arenaY, arenaW, arenaH, bumpCv, bumpD;
 function bakeBg(){
   // lava: degradado vertical y una bola gris ya borrosa (el desenfoque va en el
   // perfil, no se calcula por frame). No dependen del viewport, pero se
@@ -2505,8 +2505,19 @@ function bakeBg(){
       const k = (j*LAVA_SPR+i)*4; d[k]=d[k+1]=d[k+2]=v; d[k+3]=255; }
     c.putImageData(im,0,0); }
 
-  // luces y sombras del borde del cuenco
-  lightsCv = bgCanvas(W*DPR, H*DPR); const l = lightsCv.getContext("2d"); l.scale(DPR,DPR);
+  // arena: luces y sombras del borde del cuenco y su líquido, compuestos una vez
+  // y recortados a su caja. Por frame se pegan 1:1 con un solo drawImage, sin
+  // reescalar: antes eran un canvas del viewport entero, casi todo transparente,
+  // y el líquido reescalado en cada frame. Las luces llegan como mucho a 1,28·R
+  // del centro (la sombra exterior, abajo); +2 px de margen para el antialias.
+  // La caja se alinea a píxel de dispositivo y se intersecta con el viewport.
+  const ah = R*1.28 + 2, vw = Math.round(W*DPR), vh = Math.round(H*DPR);
+  const ax0 = Math.max(0, Math.floor((ox-ah)*DPR)), ax1 = Math.min(vw, Math.ceil((ox+ah)*DPR));
+  const ay0 = Math.max(0, Math.floor((oy-ah)*DPR)), ay1 = Math.min(vh, Math.ceil((oy+ah)*DPR));
+  arenaCv = bgCanvas(ax1-ax0, ay1-ay0);
+  arenaX = ax0/DPR; arenaY = ay0/DPR; arenaW = arenaCv.width/DPR; arenaH = arenaCv.height/DPR;
+  // se dibuja en px CSS de pantalla, como si fuera el viewport entero
+  const l = arenaCv.getContext("2d"); l.setTransform(DPR,0,0,DPR,-ax0,-ay0);
   const g = (x,y,r0,r1,stops)=>{ const q=l.createRadialGradient(x,y,r0,x,y,r1); stops.forEach(s=>q.addColorStop(s[0],s[1])); return q; };
   const disc = (x,y,r,f)=>{ l.beginPath(); l.arc(x,y,r,0,TAU); l.fillStyle=f; l.fill(); };
   // sombra exterior abajo a la derecha y halo exterior arriba a la izquierda
@@ -2516,15 +2527,17 @@ function bakeBg(){
   disc(ox, oy, R*1.02, g(ox+R*.14,oy+R*.16,R*.72,R*1.08,[[0,"rgba(0,0,0,0)"],[1,"rgba(0,0,0,.38)"]]));
   disc(ox, oy, R*1.02, g(ox-R*.12,oy-R*.14,R*.80,R*1.04,[[0,"rgba(255,255,255,0)"],[1,"rgba(255,255,255,.30)"]]));
 
-  // líquido del cuenco, BOWL_RES², que se escala a 2·R·BOWL_EXT. Sin aro: se
-  // desvanece hacia fuera y deja ver la lava.
-  bowlCv = bgCanvas(BOWL_RES, BOWL_RES); const b = bowlCv.getContext("2d"), bi = b.createImageData(BOWL_RES,BOWL_RES), d = bi.data;
+  // líquido del cuenco, BOWL_RES², que se escala a 2·R·BOWL_EXT sobre las luces.
+  // Sin aro: se desvanece hacia fuera y deja ver la lava.
+  const bowlCv = bgCanvas(BOWL_RES, BOWL_RES), b = bowlCv.getContext("2d"), bi = b.createImageData(BOWL_RES,BOWL_RES), d = bi.data;
   let k = 0;
   for (let j=0;j<BOWL_RES;j++){ const v=((j+.5)/BOWL_RES*2-1)*BOWL_EXT;
     for (let i=0;i<BOWL_RES;i++){ const u=((i+.5)/BOWL_RES*2-1)*BOWL_EXT, rho=Math.hypot(u,v);
       const fade = 1 - bgSst(BOWL_FADE0, BOWL_FADE1, rho);
       d[k]=d[k+1]=d[k+2]=bgClamp(.76+.06*(1-rho))*255; d[k+3]=bgClamp((.55+.2*rho*rho)*fade)*255; k+=4; } }
   b.putImageData(bi,0,0);
+  l.imageSmoothingEnabled = true; l.imageSmoothingQuality = "high";
+  l.drawImage(bowlCv, ox-R*BOWL_EXT, oy-R*BOWL_EXT, R*BOWL_EXT*2, R*BOWL_EXT*2);
 
   // bulto central: sombra de contacto, cuerpo, sombra interior, brillo y filete
   const hr = CELL*BUMP_R; bumpD = Math.ceil(hr*3.2);
@@ -2651,8 +2664,7 @@ function drawBg(){
     const pl = .5+.5*Math.sin(bgT*1.3+b.ph); drawBub(F_BG, x, y, b.sz*PS*(1+.3*pl), .22+.33*pl);
   }
   cx.globalAlpha = 1;
-  cx.drawImage(lightsCv, 0, 0, W, H);
-  cx.drawImage(bowlCv, ox-R*BOWL_EXT, oy-R*BOWL_EXT, R*BOWL_EXT*2, R*BOWL_EXT*2);
+  cx.drawImage(arenaCv, arenaX, arenaY, arenaW, arenaH);   // 1:1 en px de dispositivo
   // burbujas del cuenco: el giro con inercia de stepBg()
   for (const b of bubIn){
     const a = b.th;
