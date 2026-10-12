@@ -70,6 +70,11 @@ orientativo: 80 líneas.
   nivel ni game over sin decidirlo antes.
 - Las bolas que recoloca la gravedad no dejan estela: se probó la del hard drop
   y casi no se notaba.
+- Cada ficha de color en vuelo pinta su fantasma de aterrizaje, siempre y sin
+  opción para quitarlo; las blancas y el bonus, no. Predice con la misma regla
+  que el aterrizaje (`traceSeg()`, `restCell()`), nunca con una copia: si cambia
+  el aterrizaje, el fantasma lo sigue solo. Es un disco con el canto fundido
+  hacia dentro, no un anillo cortado.
 - La carga llega al anillo con los orbes, no en el match: cada bola del match
   vuela a la punta y el arco crece al llegar; la bomba sale cuando lo cierra el
   último. Un solo gesto del destello a la punta (`drawCharge()`), todos a la vez

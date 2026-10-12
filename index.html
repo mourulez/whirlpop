@@ -934,6 +934,7 @@ function reset(){
   floaters = []; cascadeF = null;
   flashT = 0; flashSet = new Set(); flashBonus = false;
   pendingBonus = null; shakeT = 0;
+  clearGhosts();
   alarm = 0; flowPrev = 0;                   // angle vuelve a 0 más abajo: sin empujón
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
   // ya asentadas, con la forma de place(): ni caen ni puntúan al aparecer
@@ -1099,9 +1100,15 @@ function cellToScreen(fc,fr){
 // El tablero GIRA, así que una posición del mundo no significa lo mismo en dos
 // frames distintos: para llevarla a celdas hay que usar el ángulo que estaba en
 // vigor cuando se tomó: por eso el ángulo se pasa siempre explícito.
-function worldToCellA(x,y,ang){
-  const s=Math.sin(-ang), co=Math.cos(-ang);
-  return [(x*co - y*s)/CELL_PS + C, (x*s + y*co)/CELL_PS + C];
+// `out` deja reutilizar el array: el fantasma no crea ninguno por tick. El
+// seno y el coseno del último ángulo se guardan: el fantasma convierte cientos
+// de puntos por tick, todos con el mismo, y con el tablero quieto el rayo también.
+let w2cA = 0, w2cS = Math.sin(-0), w2cC = Math.cos(-0);
+function worldToCellA(x,y,ang,out=[]){
+  if (ang !== w2cA){ w2cA = ang; w2cS = Math.sin(-ang); w2cC = Math.cos(-ang); }
+  const s=w2cS, co=w2cC;
+  out[0] = (x*co - y*s)/CELL_PS + C; out[1] = (x*s + y*co)/CELL_PS + C;
+  return out;
 }
 function cellToWorldA(fc,fr,ang){
   const lx=(fc-C)*CELL_PS, ly=(fr-C)*CELL_PS, s=Math.sin(ang), co=Math.cos(ang);
@@ -1180,9 +1187,10 @@ function sineCal(A, w, d){
 // perpendicular, sin signo —de eso se encarga `sig`—, así que la bola es `eje·s +
 // perp·A·sin(w·s)` para los dos vaivenes, y todo lo demás (integración en `s`,
 // calibrado, hard drop, nodo en el centro) no sabe cuál es.
-function sineAt(q, s){
+function sineAt(q, s, out=[]){
   const o = q.sig*q.A*Math.sin(q.w*s);
-  return [q.ex*s + Math.abs(q.ey)*o, q.ey*s + Math.abs(q.ex)*o];
+  out[0] = q.ex*s + Math.abs(q.ey)*o; out[1] = q.ey*s + Math.abs(q.ex)*o;
+  return out;
 }
 function spawnSine(n){
   const a = n.a, d = 0.52;
@@ -1356,15 +1364,39 @@ function rayCast(b){
 }
 
 // Un trozo: [x0,y0] en mundo con el tablero a `a0` → [x1,y1] con el tablero a `a1`.
+// Lo de la partida va aquí; la regla del recorrido, en traceSeg(), que también
+// usa el fantasma (ver stepGhosts()).
 function raySeg(b, x0, y0, a0, x1, y1, a1){
+  const s = traceSeg(x0, y0, a0, x1, y1, a1, occGrid, segRes());
+  if (s.hit){ if (!s.free) s.free = stale(b); return s; }
+  if (s.free) b.free = s.free;                 // última libre conocida del vuelo
+  return null;
+}
+// `occ(c,r)`: si una celda jugable está ocupada. La partida mira el grid; el
+// fantasma, el grid más las celdas que ya ha reservado.
+function occGrid(c, r){ return !!grid[idx(c,r)]; }
+// Resultado de traceSeg(). `hit`, `free` y `slot` son celdas [c,r] o null, y
+// apuntan a los arrays propios del resultado: quien lo reutiliza, los reutiliza.
+function segRes(){
+  return { hit:null, free:null, slot:null, fc:0, fr:0, u:0, ac:0, ar:0, bc:0, br:0,
+           _h:[0,0], _f:[0,0], _s:[0,0] };
+}
+const TS_A = [0,0], TS_B = [0,0];
+
+// El recorrido de un trozo, puro: no escribe nada fuera de `o`. Devuelve `o` con
+// el impacto —la primera celda jugable y ocupada, o null si el trozo no choca—,
+// la última libre atravesada y la última vacía (`slot`), el punto de entrada en
+// la celda del impacto (`fc, fr`) y `u`, la fracción del trozo real a la que
+// entra en ella.
+function traceSeg(x0, y0, a0, x1, y1, a1, occ, o){
   // El origen se convierte con el ángulo del INICIO del trozo, que es el que el
   // tablero tenía cuando la bola estaba ahí. Con los dos extremos convertidos con
   // el mismo ángulo el barrido tangencial del giro se cancelaba solo y el rayo no
   // lo veía: a 340°/s en el borde son 0.72 celdas por frame contra las 0.052 que
   // avanza la bola por sí misma —14 veces más—, así que el montón le pasaba por
   // delante sin tocarla y encallaba a media celda de donde se la veía chocar.
-  const [ac0,ar0] = worldToCellA(x0, y0, a0);
-  const [bc,br]   = worldToCellA(x1, y1, a1);
+  worldToCellA(x0, y0, a0, TS_A); worldToCellA(x1, y1, a1, TS_B);
+  const ac0 = TS_A[0], ar0 = TS_A[1], bc = TS_B[0], br = TS_B[1];
   // ...y se prolonga hacia atrás sobre la misma recta. La bola viene de ahí en
   // línea recta, o sea que son celdas que recorrió de verdad, y volver a trazarlas
   // cada frame es lo que permite calcular `free` ENTERO contra el grid vivo. Antes
@@ -1390,16 +1422,18 @@ function raySeg(b, x0, y0, a0, x1, y1, a1){
   let tc = dc ? ((c+0.5*sc)-ac)/dc : Infinity;
   let tr = dr ? ((r+0.5*sr)-ar)/dr : Infinity;
   let tin = 0;                                 // fracción a la que se entró en (c,r)
-  let free = null;                             // última libre atravesada, este frame
+  let hasF = false, fC = 0, fR = 0;            // última libre atravesada, este trozo
   // La misma celda, sin el filtro del campo: la última VACÍA que atravesó, sea del
   // campo o no. Es donde la bola se detendría si el tablero siguiera más allá, y es
   // lo que se dibuja cuando la partida acaba. Ver land().
-  let slot = null;
+  let hasS = false, sC = 0, sR = 0;
+  o.hit = null; o.ac = ac; o.ar = ar; o.bc = bc; o.br = br;
   // tope de seguridad: ni el segmento de un frame ni la prolongación llegan a 3
   // celdas ni con hard drop a 20 fps, así que 64 celdas es holgura contra un NaN.
+  // El fantasma traza de una vez el resto de una radial: tampoco pasa de 20.
   for (let n=0; n<64; n++){
     if (playable(c,r)){
-      if (grid[idx(c,r)]){
+      if (occ(c,r)){
         // se sale de la celda después de `t0`: la bola está aquí o llega aquí
         if (Math.min(tc,tr) > t0){
           // Sin `slot` la bola ya está DENTRO de una celda ocupada: otra aterrizó
@@ -1408,25 +1442,29 @@ function raySeg(b, x0, y0, a0, x1, y1, a1){
           // y cruza el montón. Hace snap en la celda no ocupada más cercana a
           // donde está: si es una libre del campo aterriza ahí; si no, es la de
           // fuera desde la que se la juzga. Así toda bola sin hueco tiene snap.
-          if (!slot){
-            slot = nearestOpen(ac+dc*t0, ar+dr*t0);
-            if (playable(slot[0],slot[1])) free = slot;
+          if (!hasS){
+            nearestOpen(ac+dc*t0, ar+dr*t0, occ, TS_A);
+            hasS = true; sC = TS_A[0]; sR = TS_A[1];
+            if (playable(sC,sR)){ hasF = true; fC = sC; fR = sR; }
           }
           // punto de ENTRADA en la celda: es donde la bola la toca, y de ahí sale
           // la posición visual desde la que la ficha se asienta hacia el centro.
-          return { hit:[c,r], free:free||stale(b), slot, fc:ac+dc*tin, fr:ar+dr*tin,
-                   ac, ar, bc, br };
+          o.hit = o._h; o._h[0] = c; o._h[1] = r;
+          o.fc = ac+dc*tin; o.fr = ar+dr*tin;
+          o.u = Math.max(0, (tin - t0)/(1 - t0));
+          break;
         }
-        free = slot = null;                    // tramo de atrás cortado
-      } else free = slot = [c,r];
-    } else slot = [c,r];                       // muro o exterior: no frena, pero sí cuenta
+        hasF = hasS = false;                   // tramo de atrás cortado
+      } else { hasF = hasS = true; fC = sC = c; fR = sR = r; }
+    } else { hasS = true; sC = c; sR = r; }    // muro o exterior: no frena, pero sí cuenta
     if (c===ec && r===er) break;
     if (tc<tr){ tin = tc; c += sc; tc += ddc; }
     else      { tin = tr; r += sr; tr += ddr; }
     if (tin > 1) break;                        // pasado el final del segmento
   }
-  if (free) b.free = free;                     // última libre conocida del vuelo
-  return null;
+  o.free = hasF ? o._f : null; o._f[0] = fC; o._f[1] = fR;
+  o.slot = hasS ? o._s : null; o._s[0] = sC; o._s[1] = sR;
+  return o;
 }
 
 // Red de seguridad, y solo eso: la última libre que la bola vio en frames
@@ -1442,14 +1480,14 @@ function stale(b){
 
 // Celda no ocupada —libre del campo, o muro o exterior— más cercana a un punto
 // en celdas. El anillo de fuera del array cuenta: el borde del disco está ahí.
-function nearestOpen(pc, pr){
-  let best = null, bd = Infinity;
+function nearestOpen(pc, pr, occ, out=[]){
+  let bd = Infinity;
   for (let r=-1; r<=N; r++) for (let c=-1; c<=N; c++){
-    if (playable(c,r) && grid[idx(c,r)]) continue;
+    if (playable(c,r) && occ(c,r)) continue;
     const d = (c-pc)*(c-pc) + (r-pr)*(r-pr);
-    if (d < bd){ bd = d; best = [c,r]; }
+    if (d < bd){ bd = d; out[0] = c; out[1] = r; }
   }
-  return best;
+  return out;
 }
 
 // distancia de un centro de celda a la recta del rayo, en celdas
@@ -1463,21 +1501,22 @@ function rayDist(c, r, s){
 // diagonales entre sí: entonces manda una de las dos ortogonales intermedias, la
 // más cercana al rayo. Si ninguna está libre la última libre es correcta y la
 // bola queda encajada en la esquina, tocando dos bolas.
-function restCell(s){
+function restCell(s, occ, out=[]){
   if (!s.free) return null;
-  const [c,r] = s.free, [hc,hr] = s.hit;
-  if (Math.abs(c-hc)!==1 || Math.abs(r-hr)!==1) return s.free;
-  const opts = [[c,hr],[hc,r]].filter(([p,q]) => playable(p,q) && !grid[idx(p,q)]);
-  if (opts.length < 2) return opts[0] || s.free;
-  return rayDist(opts[0][0],opts[0][1],s) <= rayDist(opts[1][0],opts[1][1],s)
-       ? opts[0] : opts[1];
+  const c = s.free[0], r = s.free[1], hc = s.hit[0], hr = s.hit[1];
+  out[0] = c; out[1] = r;
+  if (Math.abs(c-hc)!==1 || Math.abs(r-hr)!==1) return out;
+  const a = playable(c,hr) && !occ(c,hr), b = playable(hc,r) && !occ(hc,r);
+  if (a && (!b || rayDist(c,hr,s) <= rayDist(hc,r,s))) out[1] = hr;
+  else if (b) out[0] = hc;
+  return out;
 }
 
 function land(b, s){
   // el bonus no ocupa celda: actúa sobre la celda del montón contra la que choca
   if (b.bonus){ applyBonus(s.hit); return; }
 
-  const cell = restCell(s);
+  const cell = restCell(s, occGrid);
   // impactó sin haber tenido nunca una celda libre dentro del campo: no cabe.
   // Es la única muerte del juego, y es la misma en todas las direcciones.
   if (!cell){
@@ -1543,6 +1582,135 @@ function place(k, cell, vc, vr){
   }
   refreshGroup(ac, ar);
   resolve();
+}
+
+// ─── fantasma de aterrizaje ────────────────────────────────────────────────
+// Cada ficha de color en vuelo marca la celda donde acabaría si el tablero
+// dejara de girar ahora: la sombra de Tetris. No confundir con drawShadow(), la
+// sombra proyectada. Es solo dibujo: se calcula al final del tick, con el grid
+// ya quieto, y no escribe nada de la partida ni gasta Math.random.
+//
+// La predicción no es una copia de la regla del aterrizaje sino la misma:
+// traceSeg(), restCell() y la gravedad de una sola bola, con el tablero
+// congelado en `angleT`, el ángulo en el que se va a quedar. Con `angle` el
+// fantasma recorrería las celdas intermedias durante el giro.
+//
+// Coincidencias, en secuencia: se predice cada bola contra el grid y se ordenan
+// por el tick de llegada estimado (pase 1); en ese orden cada una reserva su
+// celda antes de predecir la siguiente (pase 2), así que dos fantasmas no
+// comparten celda. Las blancas entran en la secuencia y reservan, pero no se
+// dibujan: una que llega antes desplaza de verdad a una de color. El bonus no
+// entra. Aproximaciones aceptadas: no se predicen cascadas (lo que destella
+// cuenta como ocupado), se ignora `outBall`, y si en el pase 2 una bola acorta
+// camino no se reordena. La reserva vale desde ya, no desde que la otra llega:
+// una bola que cruza ahora la celda que otra ocupará después se ve chocar con
+// ella, y su fantasma salta al salir de esa celda (≈ 1 de cada 1.000 bolas).
+// Sin caché: el grid cambia en demasiados sitios para invalidarla con garantías.
+// Nada aquí crea arrays ni objetos por tick.
+const GHOST_MAX = 32;                      // bolas en vuelo que se consideran, de sobra
+const ghosts = Array.from({length:GHOST_MAX}, ()=>({ c:0, r:0, k:0 }));
+let ghostN = 0;
+const ghostOcc = new Uint8Array(N*N);      // celdas reservadas en el pase 2
+const ghostMark = new Int16Array(GHOST_MAX); let ghostMarkN = 0;
+const ghostOrd = new Int16Array(GHOST_MAX), ghostTs = new Float64Array(GHOST_MAX);   // orden y tick de llegada
+const ghostC1 = new Int16Array(GHOST_MAX), ghostR1 = new Int16Array(GHOST_MAX);      // y celda del pase 1
+function occGhost(c, r){ return !!grid[idx(c,r)] || ghostOcc[idx(c,r)] === 1; }
+
+// Resultado de ghostPredict(): celda final (gC < 0 si no cabe) y llegada en s.
+let gC = -1, gR = -1, gT = 0;
+const gSeg = segRes(), gCell = [0,0], gXY = [0,0];
+function ghostPredict(b, occ){
+  const a = angleT, q = b.sine;
+  // respaldo: la última libre del vuelo real si sigue libre, como stale(); luego,
+  // la de cada trozo de la sinusoide para el siguiente
+  let hasB = !!b.free && playable(b.free[0], b.free[1]) && !occ(b.free[0], b.free[1]);
+  let bC = hasB ? b.free[0] : 0, bR = hasB ? b.free[1] : 0;
+  let s, D = 0;                            // D: lo que consume a ritmo `sp` hasta la entrada
+  if (!q){
+    // radial: con el tablero quieto, el resto del vuelo es una recta en celdas
+    s = traceSeg(b.x, b.y, a, 0, 0, a, occ, gSeg);
+    D = s.u*Math.hypot(b.x, b.y);
+  } else {
+    // Sinusoide: la onda hasta el centro, troceada con el tope de rayCast(). Los
+    // cortes van en múltiplos fijos de `ds`, no contados desde la bola: así las
+    // cuerdas son las mismas de un tick al siguiente salvo la primera, y una onda
+    // que pasa rozando una esquina no hace saltar el fantasma de celda.
+    const wMax = 2*Math.acos(Math.max(-1, 1 - RAY_SAG*CELL_PS/q.A)), ds = wMax/q.w;
+    const n = q.s > 0 ? Math.ceil(q.s/ds) : 1;
+    let x0 = b.x, y0 = b.y, s0 = q.s;
+    for (let i=1; i<=n; i++){
+      const s1 = (n - i)*ds;
+      sineAt(q, s1, gXY);
+      s = traceSeg(x0, y0, a, gXY[0], gXY[1], a, occ, gSeg);
+      const h = SINE_EASE ? Math.pow(Math.hypot(1, q.A*q.w*Math.cos(q.w*(s0+s1)/2)), SINE_EASE) : 1;
+      const dD = h*Math.abs(s0 - s1)/q.cal;
+      if (s.hit){ D += dD*s.u; break; }
+      D += dD;
+      if (s.free){ hasB = true; bC = s.free[0]; bR = s.free[1]; }
+      x0 = gXY[0]; y0 = gXY[1]; s0 = s1;
+    }
+  }
+  // La partida suma la aceleración antes de mover: con medio paso más de `sp`,
+  // la parábola continua pasa justo por la posición de cada tick, y la llegada
+  // estimada baja exactamente SIM_DT por tick. Sin eso, dos bolas que llegan casi
+  // a la vez se turnaban el primer puesto y su fantasma saltaba de celda.
+  const acc = b.hard ? HARD_ACCEL : b.acc, sp = b.sp + acc*SIM_DT/2;
+  gT = acc > 0 ? (-sp + Math.sqrt(sp*sp + 2*acc*D))/acc : D/sp;
+  gC = gR = -1;
+  if (!s.hit) return;                      // no pasa: la roca central ocupa (C,C)
+  if (!s.free && hasB){ s.free = s._f; s._f[0] = bC; s._f[1] = bR; }
+  const cell = restCell(s, occ, gCell);
+  if (!cell) return;                       // no cabe: muere, y no pinta nada
+  // la gravedad de gravityPass(), solo para ella: el montón está asentado, así
+  // que es la única que puede moverse
+  let c = cell[0], r = cell[1];
+  for (let step=0; step<N*2; step++){
+    const dx = C-c, dy = C-r;
+    if (!dx && !dy) break;
+    const mx = Math.abs(dx) >= Math.abs(dy);
+    const p = mx ? c+Math.sign(dx) : c, w = mx ? r : r+Math.sign(dy);
+    if (!playable(p,w) || occ(p,w)) break;
+    c = p; r = w;
+  }
+  gC = c; gR = r;
+}
+
+function clearGhosts(){
+  for (let i=0; i<ghostMarkN; i++) ghostOcc[ghostMark[i]] = 0;
+  ghostMarkN = ghostN = 0;
+}
+function stepGhosts(){
+  clearGhosts();
+  if (dead) return;
+  // Pase 1: el tick de llegada de cada una contra el grid. En un mismo tick
+  // stepFlying() mueve las bolas de la última de `flying` a la primera, así que
+  // manda el índice más alto: se recorre al revés y la inserción es estable.
+  let m = 0;
+  for (let i=flying.length-1; i>=0 && m<GHOST_MAX; i--){
+    const b = flying[i];
+    if (b.bonus) continue;
+    ghostPredict(b, occGrid);
+    const tk = Math.ceil(gT/SIM_DT - 1e-6);
+    let j = m++;
+    for (; j > 0 && ghostTs[j-1] > tk; j--){
+      ghostTs[j] = ghostTs[j-1]; ghostOrd[j] = ghostOrd[j-1];
+      ghostC1[j] = ghostC1[j-1]; ghostR1[j] = ghostR1[j-1];
+    }
+    ghostTs[j] = tk; ghostOrd[j] = i; ghostC1[j] = gC; ghostR1[j] = gR;
+  }
+  // pase 2: en ese orden, cada una contra el grid y lo que reservaron las
+  // anteriores; mientras nadie ha reservado, vale la del pase 1
+  for (let j=0; j<m; j++){
+    const b = flying[ghostOrd[j]];
+    if (ghostMarkN) ghostPredict(b, occGhost);
+    else { gC = ghostC1[j]; gR = ghostR1[j]; }
+    if (gC < 0) continue;
+    const i = idx(gC, gR);
+    ghostOcc[i] = 1; ghostMark[ghostMarkN++] = i;
+    if (b.k === WHITE) continue;
+    const g = ghosts[ghostN++];
+    g.c = gC; g.r = gR; g.k = b.k;
+  }
 }
 
 // ─── la bola que no cabe ───────────────────────────────────────────────────
@@ -2831,10 +2999,25 @@ function bakeShadow(R0){
   ballDisc(x, 0, 0, R0*1.15, ballGrad(x, 0, 0, R0*.55, 0, 0, R0*1.15, [[0, "rgba(0,0,0,.8)"], [1, "rgba(0,0,0,0)"]]));
   return o;
 }
+// Fantasma de aterrizaje (ver stepGhosts()): un disco del tamaño de la bola y en
+// su color, tenue en el centro y con el canto marcado, que se funde hacia dentro
+// en lugar de cortarse en un anillo. Sin brillo ni sombra, para que no se
+// confunda con una bola de verdad.
+const GHOST_FILL_A = .16, GHOST_RIM_A = .8;
+const GHOST_FADE = .45;               // fracción del radio en que el canto se funde al centro
+let ghostSpr = {};
+function bakeGhost([, B], R0){
+  const [o, x] = ballCanvas(Math.ceil(2.2*R0)), f0 = 1 - GHOST_FADE;
+  const a = p => ballRgb(B, GHOST_FILL_A + (GHOST_RIM_A - GHOST_FILL_A)*p);
+  // rampa con aceleración (p²): casi todo el canto se concentra junto al borde
+  ballDisc(x, 0, 0, R0, ballGrad(x, 0, 0, 0, 0, 0, R0,
+    [[0, a(0)], [f0, a(0)], [f0 + GHOST_FADE*.5, a(.25)], [f0 + GHOST_FADE*.8, a(.64)], [.97, a(1)], [1, a(.85)]]));
+  return o;
+}
 function bakeBalls(){
   const R0 = CELL*.45*BALL_R0K;
-  ballSpr = {};
-  JEWEL.forEach((j, k)=>{ ballSpr[k] = bakeGlass(j, R0, TL_COLOR); });
+  ballSpr = {}; ghostSpr = {};
+  JEWEL.forEach((j, k)=>{ ballSpr[k] = bakeGlass(j, R0, TL_COLOR); ghostSpr[k] = bakeGhost(j, R0); });
   ballSpr[WHITE] = bakeGlass(JEWEL_WHITE, R0, TL_WHITE, pearlSheen);
   ballSpr.bonus  = bakeGlass(JEWEL_BONUS, R0, TL_BONUS, boltGlyph);
   stoneAlb = bakeStoneAlbedo(R0);
@@ -3455,6 +3638,7 @@ function draw(alpha){
     if (flashT>0 && flashSet.has(OUT)) popFx(outBall.k, x, y, rad);
     else drawBall(outBall.k, x, y, rad);
   }
+  drawGhosts();          // debajo de lo que vuela: la bola tapa su fantasma al pasar
 
   // el vuelo vive en el mundo; aquí, y solo aquí, pasa a pantalla. El hard drop
   // no tiene dibujo propio: lo distingue su estela de burbujas.
@@ -3474,6 +3658,14 @@ function draw(alpha){
   drawTrail(true);       // las chispas del pop, sobre las bolas
   drawRingTop();
   drawFloaters();
+}
+// Salta de celda sin interpolar y aparece sin fundido, como en Tetris. Está en
+// celda, así que gira con el tablero.
+function drawGhosts(){
+  for (let i=0; i<ghostN; i++){
+    const g = ghosts[i], [x,y] = cellToScreen(g.c, g.r);
+    sprite(ghostSpr[g.k], x, y, 1);
+  }
 }
 // Pop: fundido rápido a blanco y ligero crecimiento antes de desaparecer. Pinta
 // el halo, la bola al radio del pop y encima el blanco que la funde.
@@ -3626,6 +3818,7 @@ function updateGame(dt){
     ageBubbles(dt);
   }
   stepFlash(dt);
+  stepGhosts();           // con el grid ya quieto en este tick
   if (shakeT > 0) shakeT = Math.max(0, shakeT - dt);
   easeVisual(dt);
   stepFloaters(dt);
