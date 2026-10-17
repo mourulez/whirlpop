@@ -18,6 +18,9 @@
 <meta property="og:type" content="website">
 <!-- la única fuente, servida con el juego: cero peticiones a otros orígenes -->
 <link rel="preload" href="fonts/baloo2-latin.woff2" as="font" type="font/woff2" crossorigin>
+<!-- las diez notas de piano de los efectos (ver "audio"). Un <script> y no un
+     fetch: así carga también abriendo el fichero en local -->
+<script src="audio/piano.js" defer></script>
 <style>
   /* Baloo 2 (SIL OFL 1.1, fonts/OFL.txt), subset latino con el eje wght 400–800.
      Familia con nombre propio para no casar con una Baloo instalada en el sistema. */
@@ -207,6 +210,13 @@
   #fs, #pz { position:fixed; top:max(calc(var(--u)*1.6), env(safe-area-inset-top)); z-index:5; }
   #fs { left:max(calc(var(--u)*2), env(safe-area-inset-left)); }
   #pz { right:max(calc(var(--u)*2), env(safe-area-inset-right)); }
+  /* interruptores de música y efectos: solo en la pausa, en la esquina de #pz
+     —que en pausa está oculto—, así el telón no se mueve. Apagado, el mismo
+     icono tachado. */
+  .snd { position:absolute; top:max(calc(var(--u)*1.6), env(safe-area-inset-top));
+         right:max(calc(var(--u)*2), env(safe-area-inset-right));
+         display:flex; gap:max(8px, calc(var(--u)*2.4)); }
+  .snd [aria-pressed="true"] .slash { display:none; }
   /* medidor de fps (temporal, ver fpsMeter()): arriba al centro, entre los dos
      botones y a su altura, en el hueco que dejó el rótulo de nivel */
   #fps { position:fixed; left:50%; transform:translateX(-50%);
@@ -295,7 +305,11 @@
   <b class="ol" data-t="pause"></b><span class="pts ol" id="pfin" aria-hidden="true">0</span>
   <div class="wp wp--lime tap" id="resume"><span class="ol" data-t="resume"></span></div>
   <div class="wp wp--glass tap" id="restart"><span class="ol" data-t="restart"></span></div>
-  <div class="tut-again ol" data-t="tutAgain"></div></div>
+  <div class="tut-again ol" data-t="tutAgain"></div>
+  <div class="snd">
+    <div id="tg-mus" class="wp wp--glass wp--icon tap" role="button"><svg viewBox="0 0 24 24"><path class="ico" d="M7.8 6L20 3.5V15.2A3.2 3.2 0 1 1 17.8 12.16V7.2L10 9V17.2A3.2 3.2 0 1 1 7.8 14.16Z"/><rect class="ico slash" x="10.7" y="0" width="2.6" height="24" rx="1.3" transform="rotate(-45 12 12)"/></svg></div>
+    <div id="tg-sfx" class="wp wp--glass wp--icon tap" role="button"><svg viewBox="0 0 24 24"><path class="ico" d="M2.5 9H6.5L11.5 4.5V19.5L6.5 15H2.5Z"/><path class="ico" d="M16.24 7.76A6 6 0 0 1 16.24 16.24L14.83 14.83A4 4 0 0 0 14.83 9.17Z"/><path class="ico" d="M19.07 4.93A10 10 0 0 1 19.07 19.07L17.8 17.8A8.2 8.2 0 0 0 17.8 6.2Z"/><rect class="ico slash" x="10.7" y="0" width="2.6" height="24" rx="1.3" transform="rotate(-45 12 12)"/></svg></div>
+  </div></div>
 
 <script>
 "use strict";
@@ -322,6 +336,9 @@ const STR = {
   points:   { es:"puntos",         en:"points",       fr:"points",         it:"punti",        de:"Punkte" },
   tutAgain: { es:"Jugar de nuevo al tutorial", en:"Replay the tutorial", fr:"Rejouer le tutoriel",
               it:"Rigioca il tutorial", de:"Tutorial wiederholen" },
+  // etiquetas accesibles de los interruptores de la pausa: no se ven
+  music:    { es:"Música",         en:"Music",        fr:"Musique",        it:"Musica",       de:"Musik" },
+  sfx:      { es:"Efectos",        en:"Sound effects", fr:"Effets sonores", it:"Effetti sonori", de:"Soundeffekte" },
 
   ctrlA_touch: {
     es:"Arrastra para girar el montón.",
@@ -763,8 +780,10 @@ function lsDel(k){ try { localStorage.removeItem(k); } catch(_){} }
 // nada de lo que salga del almacén puede romper el arranque: un valor editado a
 // mano en devtools se satura o cae a 0, y un id desconocido no llega a entrar.
 function clampInt(x, max){ return Math.max(0, Math.min(max, Math.floor(Number(x) || 0))); }
+// mus y sfx: los interruptores de la pausa, 0/1. Llegaron sin subir SAVE_V: un
+// guardado sin ellos los carga encendidos.
 function blankSave(){
-  const s = { v:SAVE_V, best:0, tut:{} };
+  const s = { v:SAVE_V, best:0, tut:{}, mus:1, sfx:1 };
   for (const id of TUT_IDS) s.tut[id] = 0;
   return s;
 }
@@ -778,6 +797,8 @@ function loadSave(){
     save.best = clampInt(raw.best, Infinity);
     const tut = raw.tut || {};
     for (const id of TUT_IDS) save.tut[id] = clampInt(tut[id], TUT_MAX);
+    save.mus = raw.mus === 0 ? 0 : 1;      // lo que falte o no valga, encendido
+    save.sfx = raw.sfx === 0 ? 0 : 1;
     return;
   }
   // sin clave, con otra versión o con el JSON roto: partida limpia. Se rescata el
@@ -976,6 +997,7 @@ function reset(){
   paused = false;
   document.getElementById("over").style.display = "none";
   syncPause();
+  audioReset();
 }
 
 const safeTopEl = document.getElementById("safe-top");
@@ -1640,6 +1662,7 @@ function place(k, cell, vc, vr){
   // incluida, y commitFlash() la lee para no cobrarlo como combo. Ver ahí.
   const nb = { k, age:0, vc, vr, fresh: flashT > 0 };
   grid[idx(cell[0],cell[1])] = nb;
+  sfx("aterrizaje");
 
   // El montón se asienta AQUÍ, en el aterrizaje, no solo al estallar.
   //
@@ -1839,6 +1862,7 @@ function settleOut(){
 function gameOver(o){
   dead = true;
   deadBall = { k:o.k, vc:o.vc, vr:o.vr };
+  sfx("fin"); musicSync();           // la música se desvanece y se para
 }
 
 // ─── cadenas, colateral, gravedad ──────────────────────────────────────────
@@ -2055,13 +2079,16 @@ function commitFlash(){
     flashSet.forEach(i=>{ if (grid[i]) grid[i]=null; });
     if (flashSet.has(OUT)) outBall = null;
     if (chained){ cascadeF.links++; cascadeF.bump = 1; }
+    // un efecto por commit, estallen los grupos que estallen; el combo sube con
+    // la profundidad de la cadena
+    if (chained) sfx("combo", comboDepth); else sfx("match");
     // el primer match resuelto en la fase B del tutorial de controles la cierra
     if (ctrlPhase === "B") setCtrlPhase("C");
   }
 
   const wasBonus = flashBonus;
   flashSet = new Set(); flashBonus = false; flashT = 0;
-  gravityPass();
+  if (gravityPass()) sfx("recoloca");
 
   // encadena: si la caída formó match, sube el combo y vuelve a destellar.
   // Salvo que lo cierre una ficha aterrizada durante el destello: eso no es un
@@ -2122,6 +2149,7 @@ function fireBonus(cell){
     // bonus aplazado (pendingBonus) tiembla cuando estalla. Otra encima la
     // reinicia, sin sumar. Con movimiento reducido no hay sacudida.
     if (!reduceMotion.matches) shakeT = SHAKE_TIME;
+    sfx("bomba");                       // va con la sacudida, aunque no haya sacudida
   }
 }
 
@@ -2182,7 +2210,7 @@ function stepOrbs(dt){
     orbs.splice(i, 1); arrived = true;
     if (o.ep === gaugeEpoch) gaugeL = Math.min(gauge, gaugeL + o.cr);
   }
-  if (arrived) ringGulp();            // un trago por llegada, no por orbe
+  if (arrived){ ringGulp(); sfx("orbe"); }   // un trago por llegada, no por orbe
 }
 
 // ─── textos flotantes de puntuación ────────────────────────────────────────
@@ -2304,14 +2332,16 @@ function stoneDemo(){
   });
 }
 function ageBubbles(dt){
+  let petri = false;
   for (let i=0;i<N*N;i++){
     const g = grid[i];
     // la piedra central, las piedras y las blancas no envejecen
     if (!g || g.k<0 || g.k===STONE || g.k===WHITE) continue;
     g.age += dt;
     if (level < 2 && g.age > t) g.age = t;
-    if (g.age > STONE_TIME) g.k = STONE;
+    if (g.age > STONE_TIME){ g.k = STONE; petri = true; }
   }
+  if (petri) sfx("petri");            // uno por tick
 }
 // ─── input ─────────────────────────────────────────────────────────────────
 // La velocidad angular sale de la "energía" del gesto: un arrastre corto y lento
@@ -2378,6 +2408,7 @@ function hardDrop(){
   if (!best) return;
   best.hard = true;
   best.sp = Math.max(best.sp, HARD_SPEED);
+  sfx("drop");
 }
 
 // Los listeners cuelgan del canvas, no de window, para poder capturar el puntero:
@@ -2492,13 +2523,13 @@ function recalcKeyDir(){
 }
 
 addEventListener("keydown", e=>{
-  if (dead && (e.key===" "||e.key==="Enter")){ reset(); return; }
+  if (dead && (e.key===" "||e.key==="Enter")){ sfx("boton"); reset(); return; }
   // en pausa el teclado solo reanuda: nada se acumula para el tick de vuelta
   if (paused){
     if (e.key==="Escape"||e.code==="KeyP"||e.key===" "||e.key==="Enter"){ e.preventDefault(); resume(); }
     return;
   }
-  if (e.key==="Escape"||e.code==="KeyP"){ e.preventDefault(); pause(); return; }
+  if (e.key==="Escape"||e.code==="KeyP"){ e.preventDefault(); pauseByUser(); return; }
   if (KEY_DIRS[e.code] !== undefined){
     e.preventDefault();
     setInputMode("desktop");
@@ -2563,6 +2594,13 @@ function pause(){
   showScrim(pauseEl);
   syncTutAgain();
   syncPause();
+  musicSync();
+}
+// la pausa que pide el jugador suena; la automática (blur, pestaña, pagehide,
+// pointercancel), no
+function pauseByUser(){
+  if (dead || paused){ pause(); return; }
+  pause(); sfx("abrir");
 }
 // Puntos del telón: el número tabular y la palabra más pequeña. Solo reescribe
 // si cambian: el game over lo pide en cada frame.
@@ -2577,7 +2615,7 @@ function showScrim(el){
   const c = bgPalette()[1].map(v => Math.round(v*0.55));
   el.style.setProperty("--scrim", `rgb(${c})`);
 }
-function resume(){ paused = false; syncPause(); }
+function resume(){ paused = false; syncPause(); musicSync(); sfx("cerrar"); }
 function restart(){ flushIfDirty(); reset(); }    // el récord no espera al game over
 addEventListener("blur", pause);
 addEventListener("pagehide", pause);
@@ -2617,10 +2655,10 @@ function tapBtn(el, fn){
   el.addEventListener("pointercancel", e=>{ if (e.pointerId === id) end(); });
   el.addEventListener("lostpointercapture", e=>{ if (e.pointerId === id) end(); });
 }
-tapBtn(pzEl, pause);
+tapBtn(pzEl, pauseByUser);
 tapBtn(document.getElementById("resume"), resume);
-tapBtn(document.getElementById("restart"), restart);
-tapBtn(document.getElementById("again"), restart);
+tapBtn(document.getElementById("restart"), ()=>{ sfx("boton"); restart(); });
+tapBtn(document.getElementById("again"), ()=>{ sfx("boton"); restart(); });
 // Volver a ver los tutoriales: todos los contadores a cero y partida nueva desde
 // el nivel 1, con el guion de controles y su montón. Solo sale si hay algo que
 // repetir; se decide al abrir el telón, no en cada frame.
@@ -2635,7 +2673,7 @@ function replayTutorial(){
   startLevel = 1;
   restart();
 }
-tutAgainEls.forEach(e => tapBtn(e, replayTutorial));
+tutAgainEls.forEach(e => tapBtn(e, ()=>{ sfx("boton"); replayTutorial(); }));
 
 // ─── fullscreen ────────────────────────────────────────────────────────────
 // Se pregunta al navegador si puede, no qué dispositivo es: el iPhone dice que no
@@ -2654,6 +2692,7 @@ function syncFS(){
 syncFS();
 function toggleFS(){
   if (!fsOK) return;
+  sfx("boton");
   const d = document.documentElement;
   const p = !document.fullscreenElement && !document.webkitFullscreenElement
     ? (d.requestFullscreen || d.webkitRequestFullscreen).call(d)
@@ -2666,6 +2705,539 @@ tapBtn(fsEl, toggleFS);
 for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
   document.addEventListener(ev, ()=>{ syncFS(); setTimeout(resize, 60); });
 addEventListener("keydown", e=>{ if (e.key==="f") toggleFS(); });
+
+// ─── audio ─────────────────────────────────────────────────────────────────
+// Música y efectos, portados de bench-audio.html: el banco es la referencia de la
+// partitura, los instrumentos, la mezcla y cada efecto, y lo que aquí suene
+// distinto que allí es un error de aquí. Todo se sintetiza salvo diez notas de
+// piano (audio/piano.js, CC BY 3.0, ver audio/CREDITOS.md) para los efectos
+// tonales, que toman sus notas del acorde que suena (`curChord`).
+// Solo presentación. No escribe estado de partida ni gasta Math.random: lo que
+// el banco sortea —humanizar, burbujas, golpes fantasma, ruido— sale de
+// `arand`. La partida dispara efectos con sfx(nombre, arg), que no devuelve nada
+// y sin Web Audio (o sin desbloquear) no hace nada; nunca lanza, porque se llama
+// desde updateGame(). Varios ticks en un frame hacen coincidir sus efectos: se
+// acepta. La música es un secuenciador aparte, a setInterval y fuera del tick,
+// que solo lee `alarm` para el tempo, el filtro y la densidad.
+// Mezcla fija, la del banco aprobado pero sin su reverb: costaba un tercio del
+// hilo de audio y dos tareas de ~30 ms al arrancar, y a −16 dB bajo la mezcla no
+// se distinguía. No hay volumen, lo pone el dispositivo. El
+// jugador solo apaga música o efectos, desde la pausa; apagado no se crea ni un
+// nodo de lo apagado.
+// iOS manda en el ciclo de vida: el contexto se crea en el primer pointerup,
+// touchend o keydown (WebKit no acepta pointerdown como gesto para el audio), en
+// sesión "ambient" —respeta el interruptor de silencio y no corta la música de
+// otra app— y se suspende al salir. Nada lo reanuda solo: lo hace el gesto
+// siguiente, y lo mismo tras una interrupción (llamada, Siri). Nada de <audio>.
+const AC = window.AudioContext || window.webkitAudioContext;
+const arand = mulberry32(0xa0d10);
+const arnd  = (a,b) => a + arand()*(b-a);
+const apick = arr => arr[Math.floor(arand()*arr.length)];
+const mtof  = m => 440*Math.pow(2,(m-69)/12);
+// los deslizadores del banco en la captura aprobada: general 80 %, música 50 %
+// (ganancia al cuadrado) y efectos 90 % (1,6 por el cuadrado)
+const MASTER_G = 0.8, MUS_G = 0.5*0.5, SFX_G = 1.6*0.9*0.9;
+
+let actx = null, aWake = false, pianoBufs = [], pianoP = null, noiseBuf = null;
+let master, sfxIn, musicLP = null, duck = null, musicOut = null;
+const LAY = {}, LAYK = ['chords','mel','bass','drums'];   // capas de la música
+let curChord = "C69";
+
+// ── armonía (Do mayor / La menor) ──
+const CHORDS = {
+  C69:  {bass:36, v:[64,67,69,74], pcs:[0,4,7,9,2]},
+  A7:   {bass:45, v:[61,64,67,69], pcs:[9,1,4,7]},
+  Dm7:  {bass:38, v:[62,65,69,72], pcs:[2,5,9,0]},
+  G7:   {bass:43, v:[62,65,67,71], pcs:[7,11,2,5]},
+  E7:   {bass:40, v:[62,64,68,71], pcs:[4,8,11,2]},
+  Am7:  {bass:45, v:[60,64,67,69], pcs:[9,0,4,7]},
+  C7:   {bass:36, v:[60,64,67,70], pcs:[0,4,7,10]},
+  F6:   {bass:41, v:[60,65,69,74], pcs:[5,9,0,2]},
+  Fm6:  {bass:41, v:[60,65,68,74], pcs:[5,8,0,2]},
+  G7sus:{bass:43, v:[62,65,67,72], pcs:[7,0,2,5]},
+  Fmaj7:{bass:41, v:[57,60,64,69], pcs:[5,9,0,4]},
+  Em7:  {bass:40, v:[59,62,64,67], pcs:[4,7,11,2]}
+};
+// 32 compases: A (tema) · B (contraste, más cantable) · A' (tema variado) · C (bajada y subida hacia el parón)
+const SEC_A = [[[0,'C69']],[[0,'A7']],[[0,'Dm7']],[[0,'G7']],
+  [[0,'C69'],[8,'E7']],[[0,'Am7'],[8,'C7']],[[0,'F6'],[8,'Fm6']],[[0,'G7sus'],[8,'G7']]];
+const SEC_B = [[[0,'Fmaj7']],[[0,'Em7'],[8,'A7']],[[0,'Dm7']],[[0,'Dm7'],[8,'G7']],
+  [[0,'Em7']],[[0,'A7']],[[0,'Dm7'],[8,'Fm6']],[[0,'G7sus'],[8,'G7']]];
+const SEC_C = [[[0,'Am7']],[[0,'Dm7']],[[0,'G7']],[[0,'C69'],[8,'C7']],
+  [[0,'F6']],[[0,'Fm6']],[[0,'Em7'],[8,'A7']],[[0,'Dm7'],[8,'G7']]];
+const PROG = [...SEC_A, ...SEC_B, ...SEC_A, ...SEC_C];
+const WALK = new Set([3,7,15,19,23,31]);
+// Rhodes a contratiempo: [paso relativo, duración, velocidad]
+const COMP16=[[0,2,.9],[3,1,.55],[6,1,.8],[10,1,.8],[12,1,.5],[14,1,.75]];
+const COMP8=[[0,2,.9],[3,1,.55],[6,1,.8]];
+// Bajo saltarín de octavas: [paso relativo, intervalo, duración, velocidad]
+const BASS16=[[0,0,2,1],[3,12,1,.7],[4,7,2,.85],[6,12,1,.6],[8,0,2,.95],[11,12,1,.7],[12,7,2,.85],[14,12,1,.6]];
+const BASS8=[[0,0,2,1],[3,12,1,.7],[4,7,2,.85],[6,12,1,.6]];
+// Melodía: [compás 0-31, paso 0-15, midi, duración, velocidad, adorno]
+// Motivo saltarín que vuelve en los compases 1, 3, 5 y 7, notas cromáticas de paso,
+// notas alteradas que iluminan (Do#, Sol#), Sib de guiño y remate final hacia el Do.
+const MEL = [
+  [0,0,76,1,.85],[0,2,79,1,.75],[0,3,81,1,.75],[0,4,84,2,.95,1],[0,7,81,1,.7],[0,8,79,1,.8],[0,10,76,1,.75],[0,11,75,1,.6],[0,12,76,2,.85],[0,14,79,1,.75],
+  [1,2,79,1,.7],[1,3,81,1,.75],[1,4,85,2,.95,1],[1,6,81,1,.7],[1,8,76,1,.8],[1,10,79,1,.7],[1,12,81,1,.8],[1,13,79,1,.65],[1,14,77,2,.8],
+  [2,0,77,1,.85],[2,2,81,1,.75],[2,3,83,1,.75],[2,4,86,2,.95,1],[2,7,84,1,.7],[2,8,81,1,.8],[2,10,77,1,.75],[2,11,76,1,.6],[2,12,77,2,.85],[2,14,81,1,.75],
+  [3,0,83,1,.9,1],[3,2,83,1,.7,1],[3,3,84,1,.75],[3,4,86,2,.9],[3,8,79,1,.75],[3,9,81,1,.65],[3,10,83,1,.75],[3,12,86,1,.9],[3,14,85,1,.7],
+  [4,0,76,1,.85],[4,2,79,1,.75],[4,3,81,1,.75],[4,4,84,2,.95,1],[4,8,83,1,.8],[4,10,80,1,.75],[4,11,81,1,.65],[4,12,83,2,.85,1],[4,14,86,1,.75],
+  [5,0,84,2,.9],[5,2,83,1,.7],[5,3,81,1,.7],[5,4,76,2,.8],[5,8,82,1,.85],[5,9,81,1,.7],[5,10,80,1,.7],[5,11,79,1,.75],[5,13,76,1,.7],[5,14,79,1,.8],
+  [6,0,77,1,.85],[6,2,81,1,.75],[6,3,84,1,.75],[6,4,86,2,.9,1],[6,8,80,2,.85],[6,10,79,1,.7],[6,11,77,1,.65],[6,12,74,2,.8],
+  [7,0,84,1,.85,1],[7,2,84,1,.7,1],[7,3,86,1,.75],[7,8,86,1,.9,1],[7,10,83,1,.75],[7,12,79,1,.75],[7,13,81,1,.7],[7,14,83,2,.85,1],
+  // B: frases de dos compases, pregunta y respuesta
+  [8,0,81,3,.85],[8,4,79,1,.7],[8,6,77,1,.7],[8,7,76,3,.85],[8,12,72,1,.7],[8,14,74,1,.75],
+  [9,0,76,2,.85],[9,3,79,1,.7],[9,4,83,3,.85],[9,10,85,1,.8,1],[9,12,81,2,.8],[9,14,79,1,.7],
+  [10,0,77,3,.85],[10,4,76,1,.7],[10,6,74,1,.7],[10,7,72,3,.8],[10,12,69,1,.7],[10,14,72,1,.75],
+  [11,0,74,2,.85],[11,3,77,1,.7],[11,4,81,2,.85],[11,8,79,1,.8,1],[11,10,77,1,.7],[11,11,74,1,.7],[11,12,71,3,.8],
+  [12,0,79,1,.85],[12,2,79,1,.7,1],[12,3,83,1,.8],[12,4,86,3,.9],[12,8,83,1,.75],[12,10,79,1,.7],[12,12,76,2,.8],[12,14,74,1,.7],
+  [13,0,73,1,.8],[13,2,76,1,.75],[13,3,79,1,.75],[13,4,81,2,.85],[13,7,85,1,.85,1],[13,8,88,3,.95],[13,12,85,1,.75],[13,14,81,1,.75],
+  [14,0,77,2,.85],[14,3,81,1,.75],[14,4,86,2,.9],[14,8,84,1,.8],[14,10,80,2,.85],[14,12,77,1,.7],[14,14,74,1,.7],
+  [15,0,72,1,.8],[15,2,74,1,.75],[15,3,77,1,.75],[15,4,79,2,.85],[15,8,83,1,.85,1],[15,10,86,1,.85],[15,12,89,2,.9],[15,14,86,1,.75],
+  // A': los compases 16, 18, 20 y 22 repiten el tema (se copian abajo); estos lo varían
+  [17,2,81,1,.75],[17,3,85,1,.8],[17,4,88,2,.95,1],[17,7,85,1,.7],[17,8,81,1,.8],[17,10,79,1,.7],[17,11,78,1,.6],[17,12,79,1,.75],[17,14,77,2,.8],
+  [19,0,86,1,.9,1],[19,1,83,1,.7],[19,2,79,1,.7],[19,4,77,1,.75],[19,5,79,1,.7],[19,6,83,1,.75],[19,8,86,2,.9],[19,12,83,1,.75],[19,14,85,1,.7],
+  [21,0,81,2,.85],[21,2,84,1,.75],[21,3,88,2,.9],[21,6,84,1,.7],[21,8,82,1,.85,1],[21,10,79,1,.75],[21,11,76,1,.7],[21,12,72,2,.8],[21,14,76,1,.75],
+  [23,0,84,1,.85],[23,2,86,1,.8],[23,3,84,1,.7],[23,4,83,1,.75],[23,6,81,1,.7],[23,8,79,3,.85],[23,12,74,1,.7],[23,14,71,1,.7],
+  // C: bajada con batería ligera (24-27) y subida por secuencias (28-31)
+  [24,0,76,1,.8],[24,1,76,1,.6],[24,4,72,1,.7],[24,8,69,1,.7],[24,10,72,1,.7],[24,12,76,2,.8],
+  [25,0,77,1,.8],[25,1,77,1,.6],[25,4,74,1,.7],[25,8,69,1,.7],[25,10,74,1,.7],[25,12,77,2,.8],
+  [26,0,79,1,.8],[26,1,79,1,.6],[26,4,77,1,.7],[26,6,74,1,.7],[26,8,71,1,.7],[26,10,74,1,.7],[26,12,77,1,.75],[26,14,79,1,.8,1],
+  [27,0,84,2,.9],[27,4,79,1,.7],[27,6,76,1,.7],[27,8,82,2,.85,1],[27,12,79,1,.7],[27,14,76,1,.7],
+  [28,0,77,1,.85],[28,2,81,1,.75],[28,3,84,1,.8],[28,4,86,2,.9],[28,8,84,1,.75],[28,10,81,1,.75],[28,12,77,2,.8],
+  [29,0,80,1,.85],[29,2,84,1,.75],[29,3,86,1,.8],[29,4,89,2,.9,1],[29,8,86,1,.75],[29,10,84,1,.75],[29,12,80,2,.8],
+  [30,0,79,1,.85],[30,2,83,1,.75],[30,3,86,1,.8],[30,4,88,2,.9],[30,8,85,1,.85,1],[30,10,88,1,.85],[30,12,91,2,.95],
+  // Parón (pasos 4-7): solo el vibráfono sube por semitonos y vuelve todo
+  [31,0,89,1,.9],[31,2,86,1,.8],[31,4,83,1,.75],[31,5,84,1,.7],[31,6,85,1,.75],[31,7,86,1,.8],
+  [31,8,86,1,.9,1],[31,10,83,1,.75],[31,12,79,1,.75],[31,13,81,1,.7],[31,14,83,2,.85,1]
+];
+[[0,16],[2,18],[4,20],[6,22]].forEach(([a,b])=>MEL.filter(e=>e[0]===a).forEach(e=>MEL.push([b,...e.slice(1)])));
+const MELMAP = new Map(MEL.map(e => [e[0]*16+e[1], e]));
+
+// ── grafo ──
+// connect() encadenado no devuelve el nodo en todos los WebKit: se enlaza a mano
+function link(...ns){ for (let i=1;i<ns.length;i++) ns[i-1].connect(ns[i]); return ns[ns.length-1]; }
+function satCurve(k){ const n=2048,c=new Float32Array(n),t=Math.tanh(k);
+  for(let i=0;i<n;i++){const x=i/(n-1)*2-1; c[i]=Math.tanh(k*x)/t;} return c; }
+// lo común: general con compresor y bus de efectos. El ruido se genera aquí, una
+// vez, en el desbloqueo.
+function buildGraph(){
+  master=actx.createGain(); master.gain.value=MASTER_G;
+  const comp=actx.createDynamicsCompressor();
+  comp.threshold.value=-14; comp.ratio.value=3; comp.attack.value=.01; comp.release.value=.25;
+  link(master, comp, actx.destination);
+
+  sfxIn=actx.createGain(); sfxIn.gain.value=SFX_G; sfxIn.connect(master);
+
+  noiseBuf=actx.createBuffer(1,actx.sampleRate,actx.sampleRate);
+  const nd=noiseBuf.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=arand()*2-1;
+}
+// la cadena de la música, la primera vez que suena: con la música apagada no
+// existe. Paso-alto, filtro del peligro, saturación, ducking y salida.
+function buildMusic(){
+  const musicIn=actx.createGain();
+  musicLP=actx.createBiquadFilter(); musicLP.type='lowpass'; musicLP.frequency.value=4200; musicLP.Q.value=.4;
+  const sat=actx.createWaveShaper(); sat.curve=satCurve(1.6); sat.oversample='2x';
+  duck=actx.createGain();
+  musicOut=actx.createGain(); musicOut.gain.value=0;           // musicStart() la sube
+  const subHP=actx.createBiquadFilter(); subHP.type='highpass'; subHP.frequency.value=50; subHP.Q.value=.6;
+  link(musicIn, subHP, musicLP, sat, duck, musicOut, master);
+  for(const k of LAYK){ LAY[k]=actx.createGain(); LAY[k].connect(musicIn); }
+}
+function b64(s){ const bin=atob(s), u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return u.buffer; }
+// con callbacks: Safari anterior a 14.1 no devuelve promesa
+function decode(ab){ return new Promise((res,rej)=>{ const p=actx.decodeAudioData(ab,res,rej); if(p&&p.catch) p.catch(()=>{}); }); }
+// Arranque real de la muestra: primer instante que pasa de 0,01, menos 2 ms. Absorbe
+// el silencio del original y el retardo del codificador, que cada navegador trata a su modo.
+function onset(buf){ const d=buf.getChannelData(0); let i=0; while(i<d.length && Math.abs(d[i])<.01) i++;
+  return Math.max(0, i/buf.sampleRate - .002); }
+function nameToMidi(n){ const m=n.match(/^(C|Ds|Fs|A)(\d)$/); return 12*(+m[2]+1)+{C:0,Ds:3,Fs:6,A:9}[m[1]]; }
+// Las muestras llegan con un <script defer>: si en el desbloqueo aún no están, se
+// reintenta en el gesto siguiente. Mientras, los efectos de piano no suenan.
+function loadPiano(){
+  const S = window.WHIRLPOP_PIANO;
+  if (pianoP || !S) return;
+  pianoP = Promise.all(Object.entries(S).map(([n,d]) => decode(b64(d)).then(buf => ({midi:nameToMidi(n), buf, off:onset(buf)}))))
+    .then(list => { pianoBufs = list.sort((a,b)=>a.midi-b.midi); }, () => { pianoP = null; });
+}
+const aNow = () => actx.currentTime + .005;
+
+// ── instrumentos ──
+// Los instrumentos son los del banco, pero no se sintetizan al sonar: cada nota
+// de la música y cada textura de los efectos se hornea una vez (ver "horneado")
+// y en partida se reproduce el búfer. Sintetizada, una nota eran hasta siete
+// nodos vivos con su automatización, y la música sola tenía el hilo de audio al
+// 40 % de un núcleo, con cortes; horneada es un búfer y una ganancia. En directo
+// queda solo lo que depende del momento: el piano (sigue al acorde que suena), el
+// final de cada nota (su duración sigue al tempo) y la cadena de mezcla.
+function wow(t){ return 7*Math.sin(2*Math.PI*.45*t) + 2.5*Math.sin(2*Math.PI*5.3*t+1.3); }
+function piano(midi,t,vel,dur,dest,o={}){
+  if(!pianoBufs.length) return;
+  let best=pianoBufs[0]; for(const b of pianoBufs) if(Math.abs(b.midi-midi)<Math.abs(best.midi-midi)) best=b;
+  const src=actx.createBufferSource(); src.buffer=best.buf;
+  src.playbackRate.value=Math.pow(2,((midi-best.midi)*100 + (o.wow?wow(t):0))/1200);
+  const g=actx.createGain(), end=t+dur;
+  g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vel,t+.004);
+  g.gain.setValueAtTime(vel,end); g.gain.setTargetAtTime(0,end,o.rel||.16);
+  link(src, g, dest); src.start(t,best.off); src.stop(end+1.2);
+}
+// Nota horneada: el búfer trae el ataque y el decaimiento a velocidad 1; la
+// ganancia pone la velocidad y el apagado desde `end`, con la constante del
+// instrumento. Las tres síntesis son lineales en la velocidad: es la misma nota.
+function smp(buf,t,v,rate,end,tau,dest){
+  const s=actx.createBufferSource(), g=actx.createGain(); s.buffer=buf; s.playbackRate.value=rate;
+  g.gain.setValueAtTime(v,t); g.gain.setTargetAtTime(0,end,tau);
+  link(s, g, dest); s.start(t); s.stop(end+6*tau);
+}
+// vibráfono (melodía) y Rhodes (acordes), horneados; el piano, de muestras. El
+// `wow` era un desafinado fijo por nota: pasa a la velocidad de reproducción.
+const LEVEL={vibes:.22,rhodes:.3};
+function voice(inst,midi,t,vel,dur,dest,o={}){
+  if(inst==='piano') return piano(midi,t,vel,dur,dest,o);
+  const b=BAKED[inst][midi]; if(!b) return;
+  const end = inst==='vibes' ? t+Math.max(dur,.05)+.15 : t+dur;
+  smp(b,t,vel*LEVEL[inst],o.wow?Math.pow(2,wow(t)/1200):1,end,.12,dest);
+}
+function strum(notes,t,vel,dur,dest,spread=.014,inst='piano'){
+  notes.forEach((m,i)=>voice(inst,m,t+i*spread+arnd(0,.006),vel*arnd(.88,1),dur,dest,{wow:true}));
+}
+function bassNote(midi,t,dur,vel){ const b=BAKED.bass[midi]; if(b) smp(b,t,vel,1,t+dur,.06,LAY.bass); }
+// golpes y texturas: un búfer entre las variantes horneadas, sin más nodos
+function oneShot(v,t,dest){ if(!v) return; const s=actx.createBufferSource(); s.buffer=apick(v); s.connect(dest); s.start(t); }
+function kick(t,v){ oneShot(BAKED.drums['k'+v],t,LAY.drums); }
+function snare(t,v){ oneShot(BAKED.drums['s'+v],t,LAY.drums); }
+function hat(t,v,open){ oneShot(BAKED.drums['h'+v+(open?'o':'')],t,LAY.drums); }
+function tex(name,t){ oneShot(BAKED.tex[name],t,sfxIn); }
+function duckMusic(t,depth,hold){ if(!duck) return;
+  duck.gain.cancelScheduledValues(t); duck.gain.setTargetAtTime(depth,t,.02); duck.gain.setTargetAtTime(1,t+hold,.3); }
+
+// ── síntesis ──
+// El diseño de sonido del banco, tal cual. Solo se oye a través del horneado:
+// mientras hornea, actx, sfxIn y las capas apuntan al contexto diferido.
+function partial(f,t,v,decay,dest){
+  const o=actx.createOscillator(), g=actx.createGain(); o.type='sine'; o.frequency.value=f;
+  g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(v,t+.003); g.gain.setTargetAtTime(0,t+.003,decay/4);
+  link(o, g, dest); o.start(t); o.stop(t+decay*1.2+.05);
+}
+function envGain(g,t,v,dur,att=.002){ g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(Math.max(v,.0002),t+att); g.gain.exponentialRampToValueAtTime(.0001,t+dur); }
+function noiseHit(t,dur,v,type,freq,dest,q=.7){
+  const s=actx.createBufferSource(), f=actx.createBiquadFilter(), g=actx.createGain();
+  s.buffer=noiseBuf; f.type=type; f.frequency.value=freq; f.Q.value=q; envGain(g,t,v,dur);
+  link(s, f, g, dest); s.start(t,arand()*.5); s.stop(t+dur+.03); return f;
+}
+function tone(t,type,f0,f1,dur,v,dest){
+  const o=actx.createOscillator(), g=actx.createGain(); o.type=type;
+  o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+dur*.8);
+  envGain(g,t,v,dur,.004); link(o, g, dest); o.start(t); o.stop(t+dur+.03);
+}
+// Burbuja: chirp ascendente corto (resonancia de Minnaert). No es un evento: con
+// ella están hechos match, combo, hard drop, bomba y recolocación.
+function bubble(t,size=.5,vol=.22,dest=sfxIn){
+  const f0=(900-size*650)*arnd(.85,1.15), dur=.04+size*.09, o=actx.createOscillator(), g=actx.createGain();
+  o.type='sine'; o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f0*(1.8+size*.8),t+dur);
+  envGain(g,t,vol,dur,.003); link(o, g, dest); o.start(t); o.stop(t+dur+.03);
+}
+function bubbles(t,n,spread,s0,s1,vol,dest=sfxIn){ for(let i=0;i<n;i++) bubble(t+arand()*spread,arnd(s0,s1),vol*arnd(.6,1),dest); }
+const SYN={
+  vibes(f,t,v,dur,dest){ const end=t+Math.max(dur,.05)+.15;
+    const vg=actx.createGain(), dmp=actx.createGain(), lfo=actx.createOscillator(), lg=actx.createGain();
+    vg.gain.value=.75; lfo.frequency.value=5.2; lg.gain.value=.25; link(lfo, lg, vg.gain);
+    dmp.gain.setValueAtTime(1,end); dmp.gain.setTargetAtTime(0,end,.12); link(vg, dmp, dest);
+    partial(f,t,v,2.2,vg); partial(f*4,t,v*.12,.4,vg); lfo.start(t); lfo.stop(end+1); },
+  rhodes(f,t,v,dur,dest){ const end=t+dur;
+    const car=actx.createOscillator(), mod=actx.createOscillator(), mg=actx.createGain(),
+          tine=actx.createOscillator(), tg=actx.createGain(), g=actx.createGain();
+    car.frequency.value=f; mod.frequency.value=f; tine.frequency.value=f*14;
+    mg.gain.setValueAtTime(f*1.8,t); mg.gain.setTargetAtTime(f*.35,t,.25);
+    tg.gain.setValueAtTime(f*1.2,t); tg.gain.setTargetAtTime(0,t,.02);
+    link(mod, mg, car.frequency); link(tine, tg, car.frequency);
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(v,t+.004);
+    g.gain.setTargetAtTime(v*.3,t+.004,.6); g.gain.setTargetAtTime(0,end,.12);
+    link(car, g, dest); [car,mod,tine].forEach(x=>{x.start(t); x.stop(end+.8);}); },
+  bass(midi,t,dur,vel){
+    const f=mtof(midi), o=actx.createOscillator(), o2=actx.createOscillator(), g2=actx.createGain(),
+          lp=actx.createBiquadFilter(), g=actx.createGain();
+    o.type='sine'; o.frequency.value=f; o2.type='triangle'; o2.frequency.value=f; g2.gain.value=.45;
+    lp.type='lowpass'; lp.frequency.value=420;
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vel,t+.012);
+    g.gain.setTargetAtTime(vel*.7,t+.03,.15); g.gain.setTargetAtTime(0,t+dur,.06);
+    o.connect(lp); link(o2, g2, lp); link(lp, g, LAY.bass);
+    o.start(t); o2.start(t); o.stop(t+dur+.5); o2.stop(t+dur+.5); },
+  kick(t,v){ tone(t,'sine',120,58,.32,v,LAY.drums); noiseHit(t,.012,v*.25,'lowpass',2500,LAY.drums); },
+  snare(t,v){ noiseHit(t,.2,v*.55,'bandpass',1900,LAY.drums,.8); tone(t,'triangle',210,160,.09,v*.5,LAY.drums); },
+  hat(t,v,open){ noiseHit(t,open?.22:.045,v*.22,'highpass',7500,LAY.drums); }
+};
+
+// ── horneado ──
+// Lo que suena igual cada vez se renderiza una vez en un OfflineAudioContext
+// —mono, a la frecuencia del contexto real—, fuera del hilo principal. Las notas
+// se hornean sin apagar, a velocidad 1, con la duración justa para cubrir la más
+// larga a 96 BPM con su cola; los golpes, a cada velocidad que usa la partitura
+// (su envolvente no es lineal); lo que se sortea —ruido, burbujas—, en varias
+// variantes. Cada parte se hornea la primera vez que hace falta y con su
+// interruptor encendido: las texturas, al desbloquear o al encender los efectos;
+// la música, cuando tiene que sonar, y arranca al terminar. Lo que aún no está
+// horneado no suena.
+const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+const BAKED = { vibes:{}, rhodes:{}, bass:{}, drums:{}, tex:{} };
+const TEX_VARIANTS = 3, DRUM_VARIANTS = 2;
+let musReady = false, musBaking = false, texBaking = false;
+// [duración, receta]; la receta programa desde t, en sfxIn
+const TEX = {
+  match:     [.45, t=>bubbles(t+.01,7,.22,.15,.6,.16)],
+  orbe:      [.15, t=>bubble(t,.1,.07)],
+  anillo:    [.7,  t=>bubbles(t,10,.5,.05,.35,.1)],
+  nivel:     [.95, t=>bubbles(t+.3,8,.5,.05,.3,.1)],
+  aterrizaje:[.25, t=>{ bubble(t,.95,.22); tone(t,'sine',95,55,.09,.3,sfxIn); }],
+  giro:      [.06, t=>noiseHit(t,.02,.09,'bandpass',2600,sfxIn,1.5)],
+  // ráfaga de burbujas que crecen —y bajan de tono— mientras la bola se hunde
+  drop:      [.45, t=>{ for(let i=0;i<12;i++){ const u=i/11; bubble(t+u*.26+arnd(0,.02),.1+.55*u*arnd(.85,1.15),.15*arnd(.7,1)); } }],
+  bomba:     [.85, t=>{ tone(t,'sine',85,32,.55,.6,sfxIn); noiseHit(t,.45,.35,'lowpass',600,sfxIn); bubbles(t+.02,18,.6,.1,1,.2); }],
+  petri:     [.8,  t=>{ let x=0; for(let i=0;i<22;i++){ x+=.05*Math.pow(.9,i); noiseHit(t+x,.006,.18,'bandpass',arnd(900,2600),sfxIn,2); }
+                         tone(t,'sine',196,98,.7,.12,sfxIn); }],
+  recoloca:  [.45, t=>{ const f=noiseHit(t,.28,.1,'bandpass',700,sfxIn,1);
+                         f.frequency.setValueAtTime(700,t); f.frequency.exponentialRampToValueAtTime(1600,t+.26); bubbles(t+.05,5,.25,.1,.4,.1); }],
+  boton:     [.05, t=>noiseHit(t,.012,.05,'highpass',4000,sfxIn)],
+};
+for (let c=1; c<=6; c++) TEX['combo'+c] = [.45, t=>bubbles(t,4+c*2,.25,.1,.5,.13)];
+// las velocidades de la batería en playStep()
+const DRUM_V = { k:[.55,.45,.3], s:[.38,.22,.08], h:[.3,.2,.18,.12,.11], ho:[.2] };
+
+// Mientras se monta el grafo, actx, sfxIn y las capas apuntan al contexto
+// diferido. Es síncrono: la partida no corre en medio. null si no se pudo.
+function bakeRender(len, fn){
+  const off = new OAC(1, Math.max(1, Math.ceil(len*actx.sampleRate)), actx.sampleRate);
+  const real = actx, rs = sfxIn, rl = LAYK.map(k => LAY[k]);
+  actx = off; sfxIn = off.destination; for (const k of LAYK) LAY[k] = off.destination;
+  try { fn(0); } catch(_){ return Promise.resolve(null); }
+  finally { actx = real; sfxIn = rs; LAYK.forEach((k,i) => { LAY[k] = rl[i]; }); }
+  return new Promise(res => { off.oncomplete = e => res(e.renderedBuffer);
+    const p = off.startRendering(); if (p && p.then) p.then(res, () => res(null)); });
+}
+// [destino, clave, duración, receta, variantes]. El grafo de cada uno se monta
+// en el hilo principal (unos 3 ms, 13 el mayor): cada uno en su propia tarea, para
+// que ninguna se alargue, y como mucho cuatro renderizando a la vez.
+async function bakeList(list){
+  const busy = new Set();
+  for (const [dst, key, len, fn, many] of list){
+    await new Promise(r => setTimeout(r));
+    while (busy.size >= 4) await Promise.race(busy);
+    const p = bakeRender(len, fn).then(b => {
+      if (b){ if (many) (dst[key] = dst[key] || []).push(b); else dst[key] = b; }
+      busy.delete(p);
+    });
+    busy.add(p);
+  }
+  await Promise.all(busy);
+}
+function bakeTex(){
+  if (texBaking || !OAC || !save.sfx) return;
+  texBaking = true;
+  const list = [];
+  for (let v = 0; v < TEX_VARIANTS; v++) for (const n in TEX) list.push([BAKED.tex, n, TEX[n][0], TEX[n][1], true]);
+  bakeList(list).catch(()=>{});
+}
+function bakeMusic(){
+  if (musBaking || !OAC) return;
+  musBaking = true;
+  const B = BAKED, list = [];
+  for (let v = 0; v < DRUM_VARIANTS; v++){
+    for (const x of DRUM_V.k)  list.push([B.drums, 'k'+x,     .35, t=>SYN.kick(t,x), true]);
+    for (const x of DRUM_V.s)  list.push([B.drums, 's'+x,     .25, t=>SYN.snare(t,x), true]);
+    for (const x of DRUM_V.h)  list.push([B.drums, 'h'+x,     .1,  t=>SYN.hat(t,x,false), true]);
+    for (const x of DRUM_V.ho) list.push([B.drums, 'h'+x+'o', .25, t=>SYN.hat(t,x,true), true]);
+  }
+  const vib = new Set(), rh = new Set(), bass = new Set();
+  for (const m of MEL){ vib.add(m[2]); if (m[5]) vib.add(m[2]-1); }
+  for (const c of Object.values(CHORDS)){ c.v.forEach(x => rh.add(x)); for (const d of [0,7,12]) bass.add(c.bass+d); }
+  for (const b of WALK){ const nb = CHORDS[PROG[(b+1)%32][0][1]].bass; for (let d=1; d<=4; d++) bass.add(nb+d); }
+  // dur largo: el apagado de la síntesis cae fuera del búfer
+  for (const m of vib)  list.push([B.vibes,  m, 1.3,  t=>SYN.vibes(mtof(m),t,1,2,sfxIn)]);
+  for (const m of rh)   list.push([B.rhodes, m, 1.15, t=>SYN.rhodes(mtof(m),t,1,2,sfxIn)]);
+  for (const m of bass) list.push([B.bass,   m, .85,  t=>SYN.bass(m,t,2,1)]);
+  bakeList(list).then(() => { musReady = true; musicSync(); }, () => {});
+}
+
+// ── secuenciador ──
+// Peligro = `alarm`, la misma que calienta el fondo (0..1, ya suavizada): tempo,
+// filtro y densidad. `mStep` es la posición en la canción: vuelve al compás 1 con
+// cada reset() y la pausa la conserva.
+let mStep = 0, mNext = 0, mBpm = 96, mTimer = 0, mFade = 0, mLP = -1;
+const musicBpm = () => 96 + 28*alarm;
+function playStep(n,t0){
+  const sd=60/mBpm/4, st=n%16, bar=Math.floor(n/16)%32, segs=PROG[bar];
+  const t=t0 + (st%2 ? sd*.12 : 0);
+  const brk = bar===31 && st>=4 && st<8, walk = WALK.has(bar) && st>=12, light = bar>=24 && bar<28;
+  segs.forEach(([s,name],i)=>{
+    const end=i+1<segs.length?segs[i+1][0]:16, c=CHORDS[name], r=st-s, full=end-s===16;
+    if(st<s||st>=end) return;
+    if(r===0) curChord=name;
+    if(brk) return;
+    const ch=(full?COMP16:COMP8).find(e=>e[0]===r);
+    if(ch) strum(r===0?c.v:c.v.slice(1),t,.17*ch[2],ch[1]*sd,LAY.chords,.009,'rhodes');
+    const bn=(full?BASS16:BASS8).find(e=>e[0]===r);
+    if(bn && !walk) bassNote(c.bass+bn[1],t,bn[2]*sd,.3*bn[3]);
+    if(alarm>.6 && (st===6||st===14)) voice('rhodes',c.v[3],t,.07,1.5*sd,LAY.chords,{wow:true});
+  });
+  if(walk){ const nb=CHORDS[PROG[(bar+1)%32][0][1]].bass; bassNote(nb+4-(st-12),t,sd*.9,.25); }
+  const m=MELMAP.get(bar*16+st);
+  if(m){ const tm=t+arnd(0,.006)+(m[5]?.04:0);
+    if(m[5]) voice('vibes',m[2]-1,tm-.04,.16*m[4],.03,LAY.mel,{rel:.03});
+    voice('vibes',m[2],tm,.3*m[4],m[3]*sd*(m[3]===1?.6:.85),LAY.mel,{wow:true,rel:.12}); }
+  if(!brk && light){
+    if(st===0) kick(t,.45); if(st===8) kick(t,.3);
+    if(st===12) snare(t,.22);
+    if(st%4===0) hat(t,.18);
+  } else if(!brk){
+    if(st===0) kick(t,.55); if(st===6) kick(t,.3); if(st===8) kick(t,.45); if(st===11) kick(t,.3);
+    if(alarm>.7 && st===14) kick(t,.3);
+    if(st===4||st===12) snare(t,.38);
+    if((st===9||st===15) && arand()<.5) snare(t,.08);
+    if(st%2===0) hat(t,st%4===0?.3:.2, st===6 || st===14);
+    else if(st===3||st===11) hat(t,.12);
+    else if(alarm>.45) hat(t,.11);
+  }
+}
+// Horizonte de 0,12 s. Si el hilo se ha parado más que eso, lo perdido se salta:
+// amontonarlo sonaría todo a la vez. Con un fundido en curso no programa nada que
+// caiga después de su final, y al llegar a él se para.
+function musicTick(){
+  try {
+    const now = actx.currentTime;
+    if (mNext < now) mNext = now + .02;
+    while (mNext < now + .12 && !(mFade && mNext >= mFade)){
+      playStep(mStep, mNext);
+      mBpm += (musicBpm()-mBpm)*.25;
+      mNext += 60/mBpm/4; mStep++;
+    }
+    if (Math.abs(alarm - mLP) > .005){
+      mLP = alarm; musicLP.frequency.setTargetAtTime(4200+4000*Math.pow(alarm,1.2), now, .2);
+    }
+    if (mFade && now >= mFade) musicHalt();
+  } catch(_){ musicHalt(); }
+}
+function gainTo(p, v, dur){
+  const t = actx.currentTime;
+  p.cancelScheduledValues(t); p.setValueAtTime(p.value, t); p.linearRampToValueAtTime(v, t+dur);
+}
+function musicStart(){
+  if (!musReady){ bakeMusic(); return; }       // arranca al terminar de hornear
+  if (!musicOut) buildMusic();
+  mFade = 0; mNext = actx.currentTime + .08;
+  gainTo(musicOut.gain, MUS_G, .08);
+  mTimer = setInterval(musicTick, 25); musicTick();
+}
+function musicHalt(){ clearInterval(mTimer); mTimer = 0; mFade = 0; }
+// Suena con el audio desbloqueado, la música activada, sin pausa y sin morir. La
+// pausa para el secuenciador y baja la salida en 80 ms; al volver sigue desde el
+// mismo paso. El game over la desvanece en 0,8 s y la para.
+function musicSync(){
+  if (!actx) return;
+  try {
+    if (save.mus && !paused && !dead){ if (!mTimer) musicStart(); return; }
+    if (!mTimer || mFade) return;
+    if (dead){ mFade = actx.currentTime + .8; gainTo(musicOut.gain, 0, .8); }
+    else { musicHalt(); gainTo(musicOut.gain, 0, .08); }
+  } catch(_){}
+}
+// desde reset(): canción desde el compás 1 y estado de los disparos de la partida
+let giroK = 0, recordArm = false;
+function audioReset(){
+  giroK = 0;                          // angle vuelve a 0 en reset()
+  recordArm = bestScore > 0;
+  mStep = 0; mBpm = musicBpm();
+  if (mTimer) musicHalt();            // el fundido de un game over: empieza de cero
+  musicSync();
+}
+
+// ── efectos ──
+// notas del acorde que suena entre dos midi
+function tonesIn(lo,hi){ const p=CHORDS[curChord].pcs, out=[]; for(let m=lo;m<=hi;m++) if(p.includes(((m%12)+12)%12)) out.push(m); return out; }
+let giroT = -1;
+const SFX = {
+  // solo burbujas: con una nota de piano, sea del acorde al azar o su
+  // fundamental, se oía como un acorde encima de la música
+  match(){ tex('match',aNow()); },
+  // n: profundidad de la cadena en ese commit (comboDepth), de 1 a 6
+  combo(n){ const t=aNow(), c=Math.max(1,Math.min(6,n|0)), ts=tonesIn(72,98), i0=Math.min(c-1,ts.length-3);
+    for(let k=0;k<3;k++) piano(ts[i0+k],t+k*.055,.24+.02*c,.7,sfxIn);
+    tex('combo'+c,t); },
+  orbe(){ const t=aNow(); piano(apick(tonesIn(86,96)),t,.15,.35,sfxIn,{rel:.1}); tex('orbe',t); },
+  anillo(){ const t=aNow(); tonesIn(72,98).forEach((m,i)=>piano(m,t+i*.045,.2,.9,sfxIn)); tex('anillo',t); },
+  nivel(){ const t=aNow(), ts=tonesIn(72,86); strum(ts.slice(0,4),t,.2,1.4,sfxIn,.06); piano(ts[ts.length-1]+12,t+.32,.28,1.6,sfxIn); tex('nivel',t); },
+  record(){ const t=aNow(), ts=tonesIn(84,98); [0,1,2,3].forEach(k=>piano(ts[(k%2)+ts.length-2],t+k*.09,.18,.4,sfxIn)); },
+  fin(){ const t=aNow(); duckMusic(t,.35,1.4); tonesIn(60,79).slice(-4).reverse().forEach((m,i)=>piano(m,t+i*.17,.22,1.3,sfxIn,{rel:.4})); },
+  aterrizaje(){ tex('aterrizaje',aNow()); },
+  // como mucho uno cada 45 ms: girando al máximo serían 45 tics/s, un zumbido
+  giro(){ const t=aNow(); if (t - giroT < .045) return; giroT = t; tex('giro',t); },
+  // sin el impacto del banco (+0,33 s): aquí lo pone el aterrizaje de verdad
+  drop(){ tex('drop',aNow()); },
+  bomba(){ const t=aNow(); duckMusic(t,.45,.5); tex('bomba',t); },
+  petri(){ tex('petri',aNow()); },
+  recoloca(){ tex('recoloca',aNow()); },
+  boton(){ const t=aNow(); piano(tonesIn(84,91)[0],t,.18,.12,sfxIn,{rel:.05}); tex('boton',t); },
+  abrir(){ const t=aNow(), ts=tonesIn(79,91); piano(ts[0],t,.17,.2,sfxIn,{rel:.06}); piano(ts[2],t+.07,.17,.3,sfxIn,{rel:.08}); },
+  cerrar(){ const t=aNow(), ts=tonesIn(79,91); piano(ts[2],t,.17,.2,sfxIn,{rel:.06}); piano(ts[0],t+.07,.17,.3,sfxIn,{rel:.08}); }
+};
+// Con el contexto parado no se programa nada: al reanudar sonaría todo junto. La
+// excepción es el gesto que lo reanuda (`aWake`): su botón sí tiene que sonar.
+function sfx(name, arg){
+  if (!actx || !save.sfx || (actx.state !== "running" && !aWake)) return;
+  try { SFX[name](arg); } catch(_){}
+}
+// el tic del giro va con el paso que cruza el tablero, venga de dedo, ratón, rueda
+// o teclado. Con round y no floor: angle se acerca a angleT por debajo al girar
+// en positivo y, con floor, el último paso no cambiaba hasta converger del todo.
+function giroTick(){
+  const k = Math.round(angle/ROT_STEP);
+  if (k !== giroK){ giroK = k; sfx("giro"); }
+}
+
+// ── desbloqueo y ciclo de vida ──
+function audioUnlock(){
+  if (!AC) return;
+  try {
+    const fresh = !actx;
+    if (fresh){
+      try { if (navigator.audioSession) navigator.audioSession.type = "ambient"; } catch(_){}
+      try { actx = new AC({ latencyHint:"interactive" }); } catch(_){ actx = new AC(); }
+      buildGraph();
+      // en el gesto solo el contexto y el grafo: crear el contexto ya bloquea unos
+      // 100 ms. Las texturas se hornean después, en tareas aparte
+      setTimeout(bakeTex);
+    }
+    if (fresh || actx.state !== "running"){
+      const p = actx.resume(); if (p && p.catch) p.catch(()=>{});
+      // un búfer silencioso de una muestra: lo que iOS necesita para dar el audio por iniciado
+      const s = actx.createBufferSource(); s.buffer = actx.createBuffer(1,1,22050);
+      s.connect(actx.destination); s.start(0);
+      aWake = true; setTimeout(()=>{ aWake = false; });
+    }
+    setTimeout(loadPiano);
+    musicSync();                      // si toca sonar, hornea la música y arranca al acabar
+  } catch(_){}
+}
+for (const ev of ["pointerup", "touchend", "keydown"]) document.addEventListener(ev, audioUnlock, true);
+// al salir se suspende; al volver, el gesto siguiente lo reanuda (la partida
+// vuelve en pausa: casi siempre será el de continuar)
+function audioSleep(){
+  try { if (actx && actx.state === "running"){ const p = actx.suspend(); if (p && p.catch) p.catch(()=>{}); } } catch(_){}
+}
+addEventListener("pagehide", audioSleep);
+document.addEventListener("visibilitychange", ()=>{ if (document.hidden) audioSleep(); });
+
+// ── interruptores de la pausa ──
+// Se guardan al pulsar. Encender efectos suena; apagarlos, no.
+const musBtn = document.getElementById("tg-mus"), sfxBtn = document.getElementById("tg-sfx");
+musBtn.setAttribute("aria-label", tr("music"));
+sfxBtn.setAttribute("aria-label", tr("sfx"));
+function syncSnd(){
+  musBtn.setAttribute("aria-pressed", save.mus ? "true" : "false");
+  sfxBtn.setAttribute("aria-pressed", save.sfx ? "true" : "false");
+}
+syncSnd();
+tapBtn(musBtn, ()=>{ save.mus = save.mus ? 0 : 1; flushSave(); syncSnd(); musicSync(); sfx("boton"); });
+tapBtn(sfxBtn, ()=>{ save.sfx = save.sfx ? 0 : 1; flushSave(); syncSnd(); if (actx) bakeTex(); sfx("boton"); });
 
 // ─── fondo ─────────────────────────────────────────────────────────────────
 // Lava que recorre gamas en bucle y se calienta con el peligro, burbujas, el
@@ -3820,6 +4392,7 @@ function updateGame(dt){
     // `while` y no `if`: arrancar en un nivel adelantado (?nivel=N) encadena
     // aquí todos los intermedios en orden, ejecutando cada on() —blancas activas,
     // morado en la bolsa— y dejando a la vista el tip del nivel destino.
+    const level0 = level;
     while (!ctrlPhase && level < LEVELS.length && t >= LEVELS[level].at){
       const entering = LEVELS[level];    // 0-indexado: la entrada del nivel que abre
       level++;
@@ -3828,6 +4401,7 @@ function updateGame(dt){
       // la puesta en escena acompaña al texto: sin tip que leer no pinta nada
       if (entering.intro && tipT > 0) entering.intro();
     }
+    if (level !== level0) sfx("nivel");   // uno por tick: ?nivel=N encadena varios
     if (tipT > 0){
       tipT -= dt;
       // el fade-out ocurre DESPUÉS de agotar la ventana de lectura, no dentro
@@ -3866,6 +4440,7 @@ function updateGame(dt){
     // cada bola EN EL TABLERO, no en la pantalla.
     anglePrev = angle;
     angle += (angleT-angle)*Math.min(1,ROT_TWEEN*dt);
+    giroTick();
 
     if (!idle) spawnT -= dt;
     if (spawnT<=0){
@@ -3891,6 +4466,7 @@ function updateGame(dt){
     if (gaugeOn() && gauge >= GAUGE_MAX && gaugeL >= GAUGE_MAX && gaugeV >= GAUGE_MAX-3){
       gaugeFlashT = GAUGE_FLASH;
       spawnBonus();
+      sfx("anillo");
       ringClose();
       gauge = gaugeL = 0;        // gaugeV baja sola: el anillo se vacía barriendo
       gaugeEpoch++;
@@ -3979,7 +4555,11 @@ function frame(now){
   }
   // el récord se mueve durante la partida, en espejo con el marcador de arriba:
   // superarlo es un momento de juego, no un dato de menú.
-  if (score > bestScore){ bestScore = score; save.best = bestScore; saveDirty = true; }
+  if (score > bestScore){
+    bestScore = score; save.best = bestScore; saveDirty = true;
+    // una vez por partida, y no en la primera: batir un récord de 0 no es noticia
+    if (recordArm){ recordArm = false; sfx("record"); }
+  }
   bestEl.textContent = bestScore;
   if (dead){
     if (!bestSaved){ bestSaved = true; flushIfDirty(); syncTutAgain(); showScrim(overEl); }

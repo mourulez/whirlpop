@@ -37,7 +37,7 @@ orientativo: 80 líneas.
   explosión del pop) tiene su PRNG con semilla fija (`vrand`, `rrand`, `prand`,
   `xrand`) y su reloj propio
   avanza en `updateGame()` sin escribir estado de juego: gastarlo desde el dibujo
-  cambiaría la partida.
+  cambiaría la partida. El audio igual: `arand`, y `sfx()` solo lee la partida.
 - Toda caché horneada en un canvas aparte se crea con `bgCanvas()` y se hornea
   desde `bake()`: si la GPU se reinicia, Chrome devuelve los canvas vacíos y solo
   eso se rehornea. Se reproduce abriendo `chrome://gpucrash` en otra pestaña.
@@ -106,6 +106,13 @@ orientativo: 80 líneas.
   `navigator.languages` entre ES, EN, FR, IT y DE; si no, inglés. Sin selector
   ni forma de forzarlo. Las metas (`description`, `og:`) van fijas en inglés:
   quien las lee no ejecuta JS. "Match" y "combo" no se traducen.
+- Audio: todo lo que suena igual cada vez (notas de la música, golpes, texturas
+  de los efectos) se hornea con `OfflineAudioContext` y en partida es un búfer.
+  En directo solo el piano, el final de cada nota y la mezcla. Sintetizar al
+  sonar llevaba el hilo de audio al 40 % de un núcleo, con cortes.
+- Sin reverb: era un tercio del hilo de audio y no se distinguía (el banco aún
+  la tiene). El match suena solo a burbujas, sin piano. Sin volumen: en la pausa,
+  interruptores de música y efectos.
 
 ## Verificación
 
@@ -159,6 +166,11 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   comparan los campos de juego: las celdas llevan también estado solo de dibujo
   (`rew`). Un bug se
   demuestra primero reproduciéndolo en `HEAD`.
+- Audio: sin gesto no hay `AudioContext` y `sfx()` no hace nada. Para probarlo,
+  `--autoplay-policy=no-user-gesture-required` y un `pointerup` en `document`.
+  Decodificar y hornear no avanzan con tiempo virtual: resultado por POST. El
+  Rhodes no se compara muestra a muestra (su FM cambia con el instante de
+  arranque): por espectro y envolvente.
 
 ## Forma de trabajar
 
@@ -191,4 +203,9 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   zip de distribución, no del repo. `fonts/` (Baloo 2, OFL) e `img/` sí van en el
   zip: el juego los carga.
 - `perf/` es el banco de rendimiento, solo local (en `.gitignore`).
+- `audio/` va en el zip (el juego carga `audio/piano.js`, que se regenera con
+  `python3 audio/build_piano.py`, con red). `bench-audio.html` es el banco de
+  escucha: en el repo, no en el zip.
+- Chrome headless se cierra por PID (`taskkill /PID <pid> /T /F`), nunca por
+  nombre: cerraría también el Chrome del usuario.
 - `to-do list.md` es del usuario y está excluido en `.git/info/exclude`: no tocarlo.
