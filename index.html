@@ -259,10 +259,10 @@
   #pfin { visibility:hidden; }
   /* wordmark, encima del título. Tres topes: el 86 % del telón, 640 px (iPad,
      para que no se estire) y el 22 % del alto (móvil en horizontal, donde manda
-     el alto; 3,426 es la proporción del WebP). Sin loading="lazy": el telón
+     el alto; 3,43 es la proporción del WebP). Sin loading="lazy": el telón
      está en display:none y la imagen tiene que llegar antes de la primera pausa.
      La sombra es estática: el telón no se anima. */
-  .ovl .wordmark { width:min(86%, 640px, calc(22vh * 3.426)); height:auto;
+  .ovl .wordmark { width:min(86%, 640px, calc(22vh * 3.43)); height:auto;
                    margin-bottom:calc(var(--u)*4); pointer-events:none; user-select:none;
                    filter:drop-shadow(0 calc(var(--u)*1) calc(var(--u)*1.5) rgba(20,14,50,.35)); }
   /* volver a ver los tutoriales: fuera de la composición centrada del telón,
@@ -308,12 +308,12 @@
 <div id="fs" class="wp wp--bare wp--icon tap"><svg viewBox="0 0 24 24"><path class="ico" d="M3 9V5a2 2 0 0 1 2-2h4v3H6v3zM15 3h4a2 2 0 0 1 2 2v4h-3V6h-3zM21 15v4a2 2 0 0 1-2 2h-4v-3h3v-3zM9 21H5a2 2 0 0 1-2-2v-4h3v3h3z"/></svg></div>
 <div id="fps"></div>
 <div id="safe-top"></div>
-<div id="over" class="ovl"><img class="wordmark" src="img/whirlpop-wordmark.webp" width="1600" height="467" alt="Whirlpop" draggable="false">
+<div id="over" class="ovl"><img class="wordmark" src="img/whirlpop-wordmark.webp" width="2096" height="611" alt="Whirlpop" draggable="false">
   <b class="ol" data-t="over"></b><span class="pts ol" id="fin">0</span>
   <div class="wp wp--lime ghost"><span class="ol" data-t="resume"></span></div>
   <div class="wp wp--lime tap" id="again"><span class="ol" data-t="restart"></span></div>
   <div class="tut-again ol" data-t="tutAgain"></div></div>
-<div id="pause" class="ovl"><img class="wordmark" src="img/whirlpop-wordmark.webp" width="1600" height="467" alt="Whirlpop" draggable="false">
+<div id="pause" class="ovl"><img class="wordmark" src="img/whirlpop-wordmark.webp" width="2096" height="611" alt="Whirlpop" draggable="false">
   <b class="ol" data-t="pause"></b><span class="pts ol" id="pfin" aria-hidden="true">0</span>
   <div class="wp wp--lime tap" id="resume"><span class="ol" data-t="resume"></span></div>
   <div class="wp wp--glass tap" id="restart"><span class="ol" data-t="restart"></span></div>
