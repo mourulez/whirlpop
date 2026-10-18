@@ -34,7 +34,7 @@
           /* --u del HUD, con techo: el de la columna del móvil más ancho en vertical
              (430 px). Los marcadores son para leerse de reojo, no crecen con la
              pantalla: en tablet, a escala de la columna, tapaban el tablero y en
-             landscape se comían la franja que la esfera podía usar. */
+             landscape se comían la franja que la esfera podía usar. En .wide, ver abajo. */
           --uh: min(var(--u), 4.3px);
           --ink:#231a4c;      /* contorno de todo: abajo de lavanda [62,44,133] × .56 */
           --pearl:#f4f6fc;    /* relleno de texto */
@@ -43,6 +43,12 @@
              competiría con la alarma y con el ámbar */
           --title:#ff9f45;
           --lime-l:#eeffbe; --lime:#a0e812; --lime-m:#6fb406; --lime-d:#346400;  /* JEWEL_BONUS */ }
+  /* En .wide el HUD sale a franjas que sobran, y el techo fijo lo dejaba
+     diminuto en pantallas grandes (en un 2K, un número de 41 px junto a una
+     esfera de 900). Ahí el techo crece con la columna, a un 60 % de --u: el
+     número queda en ~5 % del alto, como en el móvil. Hasta unos 820 px de alto
+     sigue mandando 4.3px: el portátil no cambia. */
+  :root.wide { --uh: min(var(--u), max(4.3px, calc(var(--u)*.6))); }
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { width:100%; height:100%; overflow:hidden; background:#06060c;
               overscroll-behavior:none;   /* sin "página anterior" al girar con trackpad */
@@ -60,8 +66,9 @@
   /* .wp: la única pieza de controles y placas —botones, chrome y HUD—. Píldora,
      filo de tinta, labio inferior y brillo superior. El brillo se mide sobre la
      altura --h, no sobre el ancho: la misma mancha de luz en un icono redondo y
-     en un botón ancho. Color: --lime (la acción principal del telón) o --glass
-     (todo lo demás). Forma: botón (por defecto), --icon (chrome) o --plate (HUD,
+     en un botón ancho. Color: --lime (la acción principal del telón), --glass
+     (los demás botones del telón) o --bare (sin píldora: HUD, chrome e
+     interruptores). Forma: botón (por defecto), --icon (chrome) o --plate (HUD,
      no pulsable). Solo las pulsables llevan .tap, que al apretar baja el labio. */
   .wp { --h:max(50px, calc(var(--u)*14)); --lip:max(4px, calc(var(--u)*1.2)); --edge:2px;
         position:relative; height:var(--h); border-radius:999px; display:inline-flex;
@@ -90,13 +97,21 @@
   .wp--icon { --h:max(40px, calc(var(--u)*11)); --lip:calc(var(--u)*.9);
               width:var(--h); min-width:0; padding:0; }
   .wp--icon svg { width:52%; height:52%; overflow:visible; }
+  /* --bare: solo el icono o el texto, con su filo de tinta. La caja guarda las
+     medidas de la pieza —ni el layout ni wideStage() cambian—, así que el área
+     de toque es la de la píldora; sin labio que bajar, al apretar encoge. El
+     icono crece: suelto, al 52 % se quedaba en un sello. */
+  .wp--bare { background:none; box-shadow:none; }
+  .wp--bare::after { display:none; }
+  .wp--bare.tap.press { transform:scale(.88); box-shadow:none; }
+  .wp--bare.wp--icon svg { width:72%; height:72%; }
   .ico { fill:var(--pearl); stroke:var(--ink); stroke-width:2.6; paint-order:stroke fill;
          stroke-linejoin:round; }
   /* HUD: pertenece a la columna, se reparte sobre --stage y escala con --uh (--u
      con techo, ver :root).
-     Los dos marcadores viven abajo, en fila: dos placas idénticas, de ancho fijo,
-     con la etiqueta encajada en el filo de arriba y el número dentro, dejando
-     toda la mitad superior libre. En landscape, si caben, se abren a los lados
+     Los dos marcadores viven abajo, en fila: dos placas idénticas, de ancho fijo
+     y sin píldora (--bare), con la etiqueta en el filo de arriba y el número
+     dentro, dejando toda la mitad superior libre. En landscape, si caben, se abren a los lados
      (.wide, abajo). .hblock es el contenedor de layout; la placa va dentro.
      pointer-events:none es crítico: el HUD cae justo donde el pulgar empieza el
      arrastre y si captura el gesto, el giro se pierde. */
@@ -284,16 +299,16 @@
 </svg>
 <canvas id="c"></canvas>
 <div id="hud">
-  <div class="hblock"><div class="wp wp--glass wp--plate">
+  <div class="hblock"><div class="wp wp--bare wp--plate">
     <span class="hlabel ol" data-t="score"></span><span class="hval ol" id="score">0</span></div></div>
-  <div class="hblock"><div class="wp wp--glass wp--plate">
+  <div class="hblock"><div class="wp wp--bare wp--plate">
     <span class="hlabel ol" data-t="best"></span><span class="hval ol" id="bestv">0</span></div></div>
 </div>
 <div id="lvl">
   <div class="lvl-tip ol"></div>
 </div>
-<div id="pz" class="wp wp--glass wp--icon tap"><svg viewBox="0 0 24 24"><rect class="ico" x="5" y="4" width="5" height="16" rx="2"/><rect class="ico" x="14" y="4" width="5" height="16" rx="2"/></svg></div>
-<div id="fs" class="wp wp--glass wp--icon tap"><svg viewBox="0 0 24 24"><path class="ico" d="M3 9V5a2 2 0 0 1 2-2h4v3H6v3zM15 3h4a2 2 0 0 1 2 2v4h-3V6h-3zM21 15v4a2 2 0 0 1-2 2h-4v-3h3v-3zM9 21H5a2 2 0 0 1-2-2v-4h3v3h3z"/></svg></div>
+<div id="pz" class="wp wp--bare wp--icon tap"><svg viewBox="0 0 24 24"><rect class="ico" x="5" y="4" width="5" height="16" rx="2"/><rect class="ico" x="14" y="4" width="5" height="16" rx="2"/></svg></div>
+<div id="fs" class="wp wp--bare wp--icon tap"><svg viewBox="0 0 24 24"><path class="ico" d="M3 9V5a2 2 0 0 1 2-2h4v3H6v3zM15 3h4a2 2 0 0 1 2 2v4h-3V6h-3zM21 15v4a2 2 0 0 1-2 2h-4v-3h3v-3zM9 21H5a2 2 0 0 1-2-2v-4h3v3h3z"/></svg></div>
 <div id="fps"></div>
 <div id="safe-top"></div>
 <div id="over" class="ovl"><img class="wordmark" src="img/whirlpop-wordmark.webp" width="1600" height="467" alt="Whirlpop" draggable="false">
@@ -307,8 +322,8 @@
   <div class="wp wp--glass tap" id="restart"><span class="ol" data-t="restart"></span></div>
   <div class="tut-again ol" data-t="tutAgain"></div>
   <div class="snd">
-    <div id="tg-mus" class="wp wp--glass wp--icon tap" role="button"><svg viewBox="0 0 24 24"><path class="ico" d="M7.8 6L20 3.5V15.2A3.2 3.2 0 1 1 17.8 12.16V7.2L10 9V17.2A3.2 3.2 0 1 1 7.8 14.16Z"/><rect class="ico slash" x="10.7" y="0" width="2.6" height="24" rx="1.3" transform="rotate(-45 12 12)"/></svg></div>
-    <div id="tg-sfx" class="wp wp--glass wp--icon tap" role="button"><svg viewBox="0 0 24 24"><path class="ico" d="M2.5 9H6.5L11.5 4.5V19.5L6.5 15H2.5Z"/><path class="ico" d="M16.24 7.76A6 6 0 0 1 16.24 16.24L14.83 14.83A4 4 0 0 0 14.83 9.17Z"/><path class="ico" d="M19.07 4.93A10 10 0 0 1 19.07 19.07L17.8 17.8A8.2 8.2 0 0 0 17.8 6.2Z"/><rect class="ico slash" x="10.7" y="0" width="2.6" height="24" rx="1.3" transform="rotate(-45 12 12)"/></svg></div>
+    <div id="tg-mus" class="wp wp--bare wp--icon tap" role="button"><svg viewBox="0 0 24 24"><path class="ico" d="M7.8 6L20 3.5V15.2A3.2 3.2 0 1 1 17.8 12.16V7.2L10 9V17.2A3.2 3.2 0 1 1 7.8 14.16Z"/><rect class="ico slash" x="10.7" y="0" width="2.6" height="24" rx="1.3" transform="rotate(-45 12 12)"/></svg></div>
+    <div id="tg-sfx" class="wp wp--bare wp--icon tap" role="button"><svg viewBox="0 0 24 24"><path class="ico" d="M2.5 9H6.5L11.5 4.5V19.5L6.5 15H2.5Z"/><path class="ico" d="M16.24 7.76A6 6 0 0 1 16.24 16.24L14.83 14.83A4 4 0 0 0 14.83 9.17Z"/><path class="ico" d="M19.07 4.93A10 10 0 0 1 19.07 19.07L17.8 17.8A8.2 8.2 0 0 0 17.8 6.2Z"/><rect class="ico slash" x="10.7" y="0" width="2.6" height="24" rx="1.3" transform="rotate(-45 12 12)"/></svg></div>
   </div></div>
 
 <script>
@@ -536,9 +551,9 @@ const GAUGE_RAD   = R_FACTOR - BORDER_W/2 - RING_GAP - GAUGE_W/2;   // radio del
 const TELE_W      = 0.018;       // aviso    = BORDER_W * 1.5: núcleo opaco
 const TELE_HALO_W = 0.10;        // resplandor del aviso: fuera de la progresión
 // borde exterior del halo: lo más lejano que se dibuja del juego (las fichas
-// nacen a 0.52 y no llegan). En landscape la esfera se escala contra él.
+// nacen a 0.52 y no llegan). En landscape los marcadores no lo pisan.
 const HALO_R      = R_FACTOR + BORDER_W/2 + RING_GAP + TELE_HALO_W;
-const WIDE_AIR    = 0.03;        // landscape: aire del halo al borde de pantalla
+const WIDE_AIR    = 0.02;        // landscape: aire de la bola recién nacida al borde de pantalla
 const SIDE_AIR    = 0.04;        // landscape: aire a cada lado de un marcador
 const GAUGE_A0    = Math.PI;     // ancla: 9 en punto
 const GAUGE_TWEEN = 11;          // seguimiento del valor visual hacia el lógico
@@ -1006,7 +1021,12 @@ const hudPlates = document.querySelectorAll("#hud .wp--plate");
 
 // En landscape sobra pantalla a los lados de la columna. Si en esas franjas caben
 // los marcadores, salen de debajo de la esfera y la columna ya solo tiene que
-// abarcar el halo, con WIDE_AIR hasta el borde arriba y abajo: la esfera crece.
+// abarcar la bola recién nacida (SPAWN_D más su radio, el `rad` de draw()), con
+// WIDE_AIR hasta el borde arriba y abajo: la esfera crece. Es lo más lejano que
+// tiene que verse entero; el halo del aviso, que llega más allá, se puede
+// cortar en el borde (sin eso la esfera salía un 6 % menor). Las sinusoides
+// no mandan: su cresta se separa del eje en la perpendicular, y en vertical
+// llega a SINE_AMP + radio, por debajo de la bola recién nacida.
 // El tip no reserva sitio; se superpone. Devuelve el STAGE de ese
 // reparto y la semicuerda del halo a la altura de los marcadores (lo que el halo
 // quita a su franja), o null si no supera al de la columna (col).
@@ -1015,9 +1035,10 @@ const hudPlates = document.querySelectorAll("#hud .wp--plate");
 // como está. Al cruzar el cuadrado la esfera salta de tamaño.
 function wideStage(col){
   if (W <= H) return null;
-  const hMax = H / (2*(HALO_R + WIDE_AIR));
+  const reach = SPAWN_D + CELL_PS*0.45;
+  const hMax = H / (2*(reach + WIDE_AIR));
   // cota sin marcadores
-  if (Math.min(hMax, W/(2*HALO_R)) <= col) return null;
+  if (Math.min(hMax, W/(2*reach)) <= col) return null;
   const root = document.documentElement;
   root.style.setProperty("--stage", hMax+"px");
   root.style.setProperty("--chord", "0px");

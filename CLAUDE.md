@@ -91,6 +91,9 @@ orientativo: 80 líneas.
   siempre hasta la guarda superior, sin tope propio: con tope, al estrechar la
   pantalla volvía a bajar. El tip no reserva altura en ningún layout: se
   superpone. No hay rótulo de nivel.
+- Solo los botones del telón (continuar, reiniciar) tienen forma de botón. HUD,
+  pausa, pantalla completa y los interruptores de audio van sin píldora
+  (`.wp--bare`): el icono o el texto sueltos, con su filo de tinta.
 - Portrait ancho (tablet en vertical, alto/ancho < 1.55) se queda con la columna
   0.645 y el HUD centrado debajo. La ergonomía Game Boy es de móvil (no hay
   móviles 4:3): no se rediseña el tablet por los pulgares. Se propuso abrir ahí
