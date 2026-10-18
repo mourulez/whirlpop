@@ -2378,6 +2378,13 @@ function stoneDemo(){
     if (cand[j]) cand[j].age = Math.max(cand[j].age, STONE_TIME - s);
   });
 }
+// Cada piedra lleva su giro (`so`) y su espejo (`sf`) en la textura, para que no
+// salgan todas iguales (ver drawBall()). Son solo de dibujo, como `rew`, y salen
+// de su propio PRNG: nunca de Math.random ni desde el dibujo. Se fijan al entrar
+// en el aviso, así que el aviso y la piedra comparten los dos y no hay salto al
+// petrificarse; el rebobinado no los toca. Reserva: un índice de variante de
+// textura (`sv`) saldría aquí mismo y de `srand`.
+const srand = mulberry32(0x5701e);
 function ageBubbles(dt){
   let petri = false;
   for (let i=0;i<N*N;i++){
@@ -2386,6 +2393,7 @@ function ageBubbles(dt){
     if (!g || g.k<0 || g.k===STONE || g.k===WHITE) continue;
     g.age += dt;
     if (level < 2 && g.age > t) g.age = t;
+    if (g.age > STONE_WARN && g.so === undefined){ g.so = srand()*TAU; g.sf = srand() < .5 ? -1 : 1; }
     if (g.age > STONE_TIME){ g.k = STONE; petri = true; }
   }
   if (petri) sfx("petri");            // uno por tick
@@ -3728,6 +3736,7 @@ function bakeBalls(){
   stoneLt = bakeStoneLight(R0);
   shadowSpr = bakeShadow(R0);
   bakeShadowLayer();
+  bakeStoneLayer();
 }
 
 // Aviso de salida: dos sprites por color, horneados aquí y dibujados con dos
@@ -3802,31 +3811,48 @@ function bornScale(b, tv){
   return BORN_G0 + (1 - BORN_G0)*(1 + (BORN_BACK + 1)*u*u*u + BORN_BACK*u*u);
 }
 
-// sprite centrado en (x,y) a escala s; con `rot`, girado sobre su centro
-function sprite(o, x, y, s, rot){
+// sprite centrado en (x,y) a escala s; con `rot`, girado sobre su centro, y con
+// `m` = −1, además, en espejo: R(rot)·S(m, 1). La vía girada no usa save/restore:
+// pone la matriz entera y vuelve a la base del frame (DPR más la sacudida, ver
+// draw()). Por eso solo se llama con la base activa, sin translate ni rotate
+// encima; hoy la usan las piedras que no van en la capa y el aviso, desde el
+// bucle del grid y desde popFx() fuera de su save/restore.
+let baseX = 0, baseY = 0;             // desplazamiento de la base del frame, px CSS
+function sprite(o, x, y, s, rot, m = 1){
   const d = o.d*s;
-  if (rot){ cx.save(); cx.translate(x, y); cx.rotate(rot); cx.drawImage(o, -d/2, -d/2, d, d); cx.restore(); }
+  if (rot || m !== 1){
+    const c = Math.cos(rot)*DPR, n = Math.sin(rot)*DPR;
+    cx.setTransform(c*m, n*m, -n, c, DPR*(x + baseX), DPR*(y + baseY));
+    cx.drawImage(o, -d/2, -d/2, d, d);
+    cx.setTransform(DPR, 0, 0, DPR, DPR*baseX, DPR*baseY);
+  }
   else cx.drawImage(o, x - d/2, y - d/2, d, d);
 }
-// una bola de tipo k a radio r. La piedra lleva el giro del tablero en la
-// textura; la luz, nunca.
-function drawBall(k, x, y, r){
+// una bola de tipo k a radio r. La textura de la piedra gira con el tablero, más
+// el giro y el espejo propios de la celda `b` (ver ageBubbles()); la luz no gira
+// nunca. Sin `b`, o sin los dos valores, sale sin desfase. La piedra de la capa
+// (drawStoneLayer()) no pasa por aquí: el bucle del grid le pone solo la luz.
+function stoneSo(b){ return b && b.so !== undefined ? b.so : 0; }
+function stoneSf(b){ return b && b.sf !== undefined ? b.sf : 1; }
+function drawBall(k, x, y, r, b){
   const s = r/(CELL*.45);
-  if (k === STONE){ sprite(stoneSpr, x, y, s, angleDraw); sprite(stoneLt, x, y, s); }
+  if (k === STONE){ sprite(stoneSpr, x, y, s, angleDraw + stoneSo(b), stoneSf(b)); sprite(stoneLt, x, y, s); }
   else sprite(ballSpr[k], x, y, s);
 }
 // Aviso de piedra, sobre la bola entera: las grietas entran de una en una (todas
 // abiertas a p = .8) y la piedra la cubre por igual con alfa p³, que es mezclar
 // el color hacia su gris sin cambiarle el tono. Con p³ los dos colores más
 // parecidos siguen a ΔE ≥ 18 a 3,5 s de petrificarse (con la costra radial de
-// antes, a 1). En p = 1 es exactamente la piedra de drawBall(): no hay salto.
-// Como mucho cuatro drawImage, sin máscaras ni gradientes por frame.
-function drawStoneWarn(age, x, y, r){
+// antes, a 1). En p = 1 es exactamente la piedra de drawBall(), con el giro y el
+// espejo de la celda `b`: no hay salto. Como mucho cuatro drawImage, tres de ellos
+// girados, sin máscaras ni gradientes por frame.
+function drawStoneWarn(age, x, y, r, b){
   const p = Math.max(0, Math.min(1, (age-STONE_WARN)/(STONE_TIME-STONE_WARN)));
   const s = r/(CELL*.45), m = p*p*p, n = p*CRACKS*1.25, i = Math.min(CRACKS, Math.floor(n));
-  cx.globalAlpha = m; sprite(stoneAlb, x, y, s, angleDraw);
-  cx.globalAlpha = 1; if (i) sprite(crackC[i-1], x, y, s, angleDraw);
-  if (i < CRACKS){ cx.globalAlpha = n - i; sprite(crackL[i], x, y, s, angleDraw); }
+  const a = angleDraw + stoneSo(b), f = stoneSf(b);
+  cx.globalAlpha = m; sprite(stoneAlb, x, y, s, a, f);
+  cx.globalAlpha = 1; if (i) sprite(crackC[i-1], x, y, s, a, f);
+  if (i < CRACKS){ cx.globalAlpha = n - i; sprite(crackL[i], x, y, s, a, f); }
   cx.globalAlpha = m; sprite(stoneLt, x, y, s);
   cx.globalAlpha = 1;
 }
@@ -3881,6 +3907,75 @@ function drawShadowLayer(rad){
   cx.save();
   cx.translate(ox + rad*SHADOW_OFF[0], oy + rad*SHADOW_OFF[1]); cx.rotate(angleDraw);
   cx.drawImage(shadowCv, x0, y0, x1-x0, y1-y0, (x0-hd)/DPR, (y0-hd)/DPR, (x1-x0)/DPR, (y1-y0)/DPR);
+  cx.restore();
+}
+// La textura de las piedras quietas va junta en otra capa, como las sombras: gira
+// con el tablero y cada piedra lleva dentro su giro y su espejo fijos, así que
+// pintarla girada da lo mismo que pintarlas una a una, con una orden en vez de
+// una por piedra. La luz no entra: no gira, y el bucle del grid la pinta encima
+// en su orden de siempre. La capa va debajo de todas las bolas; el albedo no
+// llega al cristal de las vecinas quietas, así que con ellas el resultado es el
+// mismo.
+// Entran las STONE quietas con el criterio de las sombras (shadowStill()), y solo
+// si nada de lo que se mueve o revienta llega a tocarlas: esa bola quedaría entre
+// la textura de la capa y la luz, con el borde de la piedra cruzándola. Esas,
+// las que se mueven y las que revientan siguen en drawBall(), en su orden de
+// fila. El aviso no entra: no es STONE y su alfa cambia en cada frame.
+// stoneOn guarda la celda, no un flag: se compara por identidad, porque otra
+// piedra en la misma celda trae otro giro. Se rehace solo cuando cambia alguna.
+// No es 1:1: va girada y se remuestrea al pintarla.
+const STONE_ALB_R = .45*BALL_R0K*.92;            // radio del albedo, en celdas (bakeStoneAlbedo())
+const STONE_NEAR_MOVE = .45*BALL_R0K + STONE_ALB_R;   // una bola entera que se recoloca
+const STONE_NEAR_POP = .45*2.3 + STONE_ALB_R;    // el halo del pop, que llega a 2,3 radios
+let stoneCv, stoneHd, stoneBox = null, stoneDirty = true;
+const stoneOn = new Array(N*N).fill(null), stoneBusy = [];
+function bakeStoneLayer(){
+  stoneHd = Math.ceil((MASK_R*CELL + stoneSpr.d/2 + 1)*DPR);
+  stoneCv = bgCanvas(2*stoneHd, 2*stoneHd); stoneDirty = true;
+}
+// ¿llega a la celda (c, r) algo de lo que no está quieto?
+function stoneNear(c, r){
+  for (let k=0;k<stoneBusy.length;k+=3){
+    const dc = stoneBusy[k] - c, dr = stoneBusy[k+1] - r;
+    if (dc*dc + dr*dr < stoneBusy[k+2]*stoneBusy[k+2]) return true;
+  }
+  return false;
+}
+function drawStoneLayer(){
+  stoneBusy.length = 0;
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    const i = idx(c,r), b = grid[i];
+    if (b && b.k >= 0 && !shadowStill(b, c, r, i))
+      stoneBusy.push(b.vc===undefined?c:b.vc, b.vr===undefined?r:b.vr, flashT>0 && flashSet.has(i) ? STONE_NEAR_POP : STONE_NEAR_MOVE);
+  }
+  let changed = stoneDirty;
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    const i = idx(c,r), b = grid[i], on = b && b.k === STONE && shadowStill(b, c, r, i) && !stoneNear(c, r) ? b : null;
+    if (on !== stoneOn[i]){ stoneOn[i] = on; changed = true; }
+  }
+  const hd = stoneHd;
+  if (changed){
+    stoneDirty = false;
+    const x = stoneCv.getContext("2d"), d = stoneSpr.d, w = 2*hd;
+    x.setTransform(1,0,0,1,0,0); x.clearRect(0, 0, w, w);
+    let lo = Infinity, hi = -Infinity, top = Infinity, bot = -Infinity;
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+      const b = stoneOn[idx(c,r)]; if (!b) continue;
+      const lx = (c-C)*CELL, ly = (r-C)*CELL, m = stoneSf(b);
+      const co = Math.cos(stoneSo(b))*DPR, n = Math.sin(stoneSo(b))*DPR;
+      x.setTransform(co*m, n*m, -n, co, hd + lx*DPR, hd + ly*DPR);
+      x.drawImage(stoneSpr, -d/2, -d/2, d, d);
+      lo = Math.min(lo, lx); hi = Math.max(hi, lx); top = Math.min(top, ly); bot = Math.max(bot, ly);
+    }
+    const px = v => Math.max(0, Math.min(w, hd + v*DPR));
+    stoneBox = lo > hi ? null : [Math.floor(px(lo - d/2 - 1)), Math.floor(px(top - d/2 - 1)),
+                                 Math.ceil(px(hi + d/2 + 1)),  Math.ceil(px(bot + d/2 + 1))];
+  }
+  if (!stoneBox) return;
+  const [x0, y0, x1, y1] = stoneBox;
+  cx.save();
+  cx.translate(ox, oy); cx.rotate(angleDraw);
+  cx.drawImage(stoneCv, x0, y0, x1-x0, y1-y0, (x0-hd)/DPR, (y0-hd)/DPR, (x1-x0)/DPR, (y1-y0)/DPR);
   cx.restore();
 }
 
@@ -4317,8 +4412,10 @@ function draw(alpha){
   // el siguiente resize. Es asignar seis números: no cuesta nada.
   cx.setTransform(DPR,0,0,DPR,0,0);
   drawBg();
-  // la sacudida de la bomba mueve todo menos el fondo (ver shakeOffset())
+  // la sacudida de la bomba mueve todo menos el fondo (ver shakeOffset()).
+  // sprite() vuelve a esta base tras cada sprite girado.
   const sh = shakeOffset(alpha);
+  baseX = sh ? sh[0] : 0; baseY = sh ? sh[1] : 0;
   if (sh) cx.setTransform(DPR,0,0,DPR,sh[0]*DPR,sh[1]*DPR);
 
   // la frontera no se traza: el borde del cuenco del fondo ya dibuja el límite, y
@@ -4365,19 +4462,22 @@ function draw(alpha){
   cx.globalAlpha = 1;
 
   drawTrail(false);
+  drawStoneLayer();
 
   for (let r=0;r<N;r++) for (let c=0;c<N;c++){
     const b = grid[idx(c,r)]; if (!b || b.k<0) continue;   // la roca central es el bulto del fondo
     const vc = b.vc===undefined?c:b.vc, vr = b.vr===undefined?r:b.vr;
     const [x,y] = cellToScreen(vc,vr);
-    if (flashT>0 && flashSet.has(idx(c,r))){ popFx(b.k, x, y, rad); continue; }
-    drawBall(b.k, x, y, rad);
+    if (flashT>0 && flashSet.has(idx(c,r))){ popFx(b.k, x, y, rad, b); continue; }
+    // la piedra quieta ya tiene la textura en la capa: aquí solo su luz
+    if (stoneOn[idx(c,r)] === b){ sprite(stoneLt, x, y, 1); continue; }
+    drawBall(b.k, x, y, rad, b);
     // Aviso: la bola se va volviendo piedra. Entra con una grieta y se agrisa al
     // acercarse la petrificación; tras un match de 2 se ve desandar (`rew`). El
     // nivel 1 lo esconde aunque la edad ya corra: nada se muestra antes de su
     // nivel, y el aviso es justo lo que el tip del nivel 2 nombra.
     const va = Math.max(b.age, b.rew || 0);
-    if (level >= 2 && b.k!==WHITE && b.k!==STONE && va > STONE_WARN) drawStoneWarn(va, x, y, rad);
+    if (level >= 2 && b.k!==WHITE && b.k!==STONE && va > STONE_WARN) drawStoneWarn(va, x, y, rad, b);
   }
 
   // la causante del game over, en coordenadas de grid como las del montón:
@@ -4430,7 +4530,7 @@ function popE(){ const p = 1 - flashT/FLASH_TIME; return p*p*(3-2*p); }   // 0 �
 function popCharges(){ return !flashBonus && gaugeOn(); }
 function popR(rad){ return rad*(1 + 0.30*popE()); }
 function popShadowR(rad){ return popCharges() ? rad*(1 - bgSst(0, ORB_WHITE, FLASH_TIME - flashT)) : popR(rad); }
-function popFx(k, x, y, rad){
+function popFx(k, x, y, rad, b){
   const e = popE();
   cx.save();
   cx.globalAlpha = 0.55*(1-e);
@@ -4439,12 +4539,12 @@ function popFx(k, x, y, rad){
   cx.restore();
   if (popCharges()){
     const tau = Math.max(0, FLASH_TIME - flashT - (1 - ringAlpha)*SIM_DT);   // interpolado, como el orbe
-    if (tau < ORB_WHITE) drawBall(k, x, y, rad);
+    if (tau < ORB_WHITE) drawBall(k, x, y, rad, b);
     drawCharge(x, y, x, y, 0, tau, rad);
     return;
   }
   const rr = popR(rad);
-  drawBall(k, x, y, rr);
+  drawBall(k, x, y, rr, b);
   cx.globalAlpha = Math.min(1, e*1.35);
   cx.beginPath(); cx.arc(x, y, rr*.9, 0, TAU); cx.fillStyle = "#ffffff"; cx.fill();
   cx.globalAlpha = 1;

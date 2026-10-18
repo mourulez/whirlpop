@@ -34,8 +34,8 @@ orientativo: 80 líneas.
   el tick anterior y el actual y no modifica nada de la partida. Los listeners de
   input solo tocan estado que el tick siguiente lee al empezar.
 - `Math.random` es solo de la partida. Cada efecto visual (fondo, rayo, estela,
-  explosión del pop) tiene su PRNG con semilla fija (`vrand`, `rrand`, `prand`,
-  `xrand`) y su reloj propio
+  explosión del pop, giro de las piedras) tiene su PRNG con semilla fija (`vrand`,
+  `rrand`, `prand`, `xrand`, `srand`) y su reloj propio
   avanza en `updateGame()` sin escribir estado de juego: gastarlo desde el dibujo
   cambiaría la partida. El audio igual: `arand`, y `sfx()` solo lee la partida.
 - Toda caché horneada en un canvas aparte se crea con `bgCanvas()` y se hornea
@@ -43,7 +43,7 @@ orientativo: 80 líneas.
   eso se rehornea. Se reproduce abriendo `chrome://gpucrash` en otra pestaña.
   Se pinta 1:1 en px de dispositivo, recortada a lo que ocupa: con DPR
   fraccionario, un canvas de `ceil(W·DPR)` pintado a `W` se reescala y se corre
-  medio píxel. La excepción es lo que gira con el tablero (la capa de sombras):
+  medio píxel. La excepción es lo que gira con el tablero (las capas de sombras y de piedras):
   se remuestrea por fuerza.
 - Cero peticiones externas (requisito Poki): fuente e imágenes van en el repo
   con ruta relativa, nada de CDN ni Google Fonts.
@@ -170,7 +170,7 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 - Un cambio que no debe alterar el juego se demuestra con partidas sembradas
   idénticas contra `HEAD`: mismo grid, puntuación y frame de muerte. Del grid se
   comparan los campos de juego: las celdas llevan también estado solo de dibujo
-  (`rew`). Un bug se
+  (`rew`, `so`, `sf`). Un bug se
   demuestra primero reproduciéndolo en `HEAD`.
 - Un cambio que no debe alterar el dibujo se demuestra igual, comparando además
   el canvas píxel a píxel (`getImageData`) en los mismos ticks: `HEAD` y la
