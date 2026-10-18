@@ -94,10 +94,12 @@ orientativo: 80 líneas.
 - Solo los botones del telón (continuar, reiniciar) tienen forma de botón. HUD,
   pausa, pantalla completa y los interruptores de audio van sin píldora
   (`.wp--bare`): el icono o el texto sueltos, con su filo de tinta.
-- Portrait ancho (tablet en vertical, alto/ancho < 1.55) se queda con la columna
-  0.645 y el HUD centrado debajo. La ergonomía Game Boy es de móvil (no hay
-  móviles 4:3): no se rediseña el tablet por los pulgares. Se propuso abrir ahí
-  el HUD a las esquinas para agrandar la esfera y se descartó.
+- Portrait ancho (tablet en vertical, alto/ancho < 1.55): el HUD sigue centrado
+  debajo, pero la columna crece hasta llenar el alto (`tallStage()`): la franja
+  de pulgares es de móvil y en tablet sobraba. Se propuso abrir ahí el HUD a las
+  esquinas para agrandar más la esfera y se descartó.
+- Los marcadores no escalan con la columna a pleno: `--uh` es `--u` hasta 4.3px
+  y por encima, el 60 % de `--u`, en todos los layouts. En móvil no cambia nada.
 - El tutorial de controles del nivel 1 manda sobre el calendario: la partida no
   arranca (ni corre `t` ni cae nada) hasta el primer giro, y mientras dura `t` se
   retiene en el `at` del nivel 2, que no abre hasta consumirlo. Los niveles no se

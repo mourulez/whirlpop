@@ -31,11 +31,14 @@
      columna: toda medida de UI se expresa en múltiplos suyos, con suelo en px. */
   :root { --stage: min(100vw, 64.5vh);
           --u: calc(var(--stage) / 100);
-          /* --u del HUD, con techo: el de la columna del móvil más ancho en vertical
-             (430 px). Los marcadores son para leerse de reojo, no crecen con la
-             pantalla: en tablet, a escala de la columna, tapaban el tablero y en
-             landscape se comían la franja que la esfera podía usar. En .wide, ver abajo. */
-          --uh: min(var(--u), 4.3px);
+          /* --u del HUD: hasta 4.3px (la columna del móvil más ancho en vertical,
+             430 px) es --u; por encima crece a un 60 % de --u. Los marcadores son
+             para leerse de reojo: a escala plena de la columna tapaban el tablero
+             en tablet y se comían la franja de la esfera en landscape, y con un
+             techo fijo se quedaban diminutos en pantallas grandes (en un 2K, un
+             número de 41 px junto a una esfera de 900). Al 60 % el número queda en
+             ~5 % del alto, como en el móvil. */
+          --uh: min(var(--u), max(4.3px, calc(var(--u)*.6)));
           --ink:#231a4c;      /* contorno de todo: abajo de lavanda [62,44,133] × .56 */
           --pearl:#f4f6fc;    /* relleno de texto */
           --label:#c4bdea;    /* etiquetas del HUD: perla apagado hacia lavanda */
@@ -43,12 +46,6 @@
              competiría con la alarma y con el ámbar */
           --title:#ff9f45;
           --lime-l:#eeffbe; --lime:#a0e812; --lime-m:#6fb406; --lime-d:#346400;  /* JEWEL_BONUS */ }
-  /* En .wide el HUD sale a franjas que sobran, y el techo fijo lo dejaba
-     diminuto en pantallas grandes (en un 2K, un número de 41 px junto a una
-     esfera de 900). Ahí el techo crece con la columna, a un 60 % de --u: el
-     número queda en ~5 % del alto, como en el móvil. Hasta unos 820 px de alto
-     sigue mandando 4.3px: el portátil no cambia. */
-  :root.wide { --uh: min(var(--u), max(4.3px, calc(var(--u)*.6))); }
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { width:100%; height:100%; overflow:hidden; background:#06060c;
               overscroll-behavior:none;   /* sin "página anterior" al girar con trackpad */
@@ -445,8 +442,9 @@ const N = 15, C = (N-1)/2;
 const R_FACTOR = 0.46;
 // mobile first: el layout es una columna vertical. STAGE es su ancho, y de él
 // sale todo el tamaño del juego. Único número para abrir o cerrar la columna en
-// todas las pantallas a la vez. En landscape los marcadores pueden salir a los
-// lados y la columna se ensancha: ver wideStage().
+// todas las pantallas a la vez. Es un suelo: en landscape los marcadores pueden
+// salir a los lados y la columna se ensancha (ver wideStage()), y en un portrait
+// ancho crece hasta llenar el alto (ver tallStage()).
 const STAGE_ASPECT = 0.645;
 const ROT_STEP = 7.5 * Math.PI/180;
 const ROT_TWEEN = 26;      // seguimiento de angle hacia angleT; a 340°/s un valor bajo va elástico
@@ -554,6 +552,7 @@ const TELE_HALO_W = 0.10;        // resplandor del aviso: fuera de la progresió
 // nacen a 0.52 y no llegan). En landscape los marcadores no lo pisan.
 const HALO_R      = R_FACTOR + BORDER_W/2 + RING_GAP + TELE_HALO_W;
 const WIDE_AIR    = 0.02;        // landscape: aire de la bola recién nacida al borde de pantalla
+const TALL_AIR    = 0.03;        // portrait ancho: aire de la bola recién nacida a los marcadores
 const SIDE_AIR    = 0.04;        // landscape: aire a cada lado de un marcador
 const GAUGE_A0    = Math.PI;     // ancla: 9 en punto
 const GAUGE_TWEEN = 11;          // seguimiento del valor visual hacia el lógico
@@ -1067,13 +1066,43 @@ function wideStage(col){
   return s > col ? { s, chord: chord(s) } : null;
 }
 
+// En portrait la columna sale de STAGE_ASPECT, y en el móvil la limita el ancho:
+// el aire que sobra debajo de la esfera es el de los pulgares. En un portrait
+// ancho (tablet en vertical, alto/ancho < 1.55) la limitaba esa proporción, y
+// sobraban a la vez una franja bajo la esfera y ancho a los lados. Aquí la
+// columna crece, hasta el ancho de pantalla, mientras la bola recién nacida de
+// abajo (SPAWN_D más su radio, como en wideStage()) deje TALL_AIR hasta la
+// etiqueta de los marcadores. Arriba no cambia nada: la esfera sube hasta la
+// misma guarda que en el móvil (ver resize()). El HUD crece con la columna y
+// tiene suelos en px: se mide, no se calcula; fits es monótona (todo baja o
+// sube a la vez) y se bisecta. Devuelve el STAGE, nunca menor que col.
+const hudLabels = document.querySelectorAll("#hud .hlabel");
+function tallStage(col){
+  if (W > H || col >= W) return col;
+  const root = document.documentElement;
+  const safe = safeTopEl.getBoundingClientRect().height;
+  const reach = SPAWN_D + CELL_PS*0.45;
+  const fits = s => {
+    root.style.setProperty("--stage", s+"px");
+    let hudTop = H;
+    for (const e of hudLabels) hudTop = Math.min(hudTop, e.getBoundingClientRect().top);
+    const oy = Math.min(H/2, safe + s*(0.60 + TOP_KEEP));   // el mismo lift de resize()
+    return oy + s*(reach + TALL_AIR) <= hudTop;
+  };
+  if (fits(W)) return W;
+  if (!fits(col)) return col;
+  let lo = col, hi = W;
+  for (let i = 0; i < 24; i++){ const m = (lo+hi)/2; if (fits(m)) lo = m; else hi = m; }
+  return lo;
+}
+
 function resize(){
   W = innerWidth; H = innerHeight;
   const col = Math.min(W, H*STAGE_ASPECT);
   const wide = wideStage(col);
   const root = document.documentElement;
   root.classList.toggle("wide", !!wide);
-  STAGE = wide ? wide.s : col;
+  STAGE = wide ? wide.s : tallStage(col);
   root.style.setProperty("--stage", STAGE+"px");
   if (wide) root.style.setProperty("--chord", wide.chord+"px");
 
