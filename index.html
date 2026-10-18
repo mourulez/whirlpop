@@ -1691,9 +1691,9 @@ function place(k, cell, vc, vr){
 }
 
 // ─── fantasma de aterrizaje ────────────────────────────────────────────────
-// Cada ficha de color en vuelo marca la celda donde acabaría si el tablero
-// dejara de girar ahora: la sombra de Tetris. No confundir con drawShadow(), la
-// sombra proyectada. Es solo dibujo: se calcula al final del tick, con el grid
+// Cada ficha en vuelo, blanca o de color, marca la celda donde acabaría si el
+// tablero dejara de girar ahora: la sombra de Tetris. No confundir con
+// drawShadow(), la sombra proyectada. Es solo dibujo: se calcula al final del tick, con el grid
 // ya quieto, y no escribe nada de la partida ni gasta Math.random.
 //
 // La predicción no es una copia de la regla del aterrizaje sino la misma:
@@ -1704,11 +1704,9 @@ function place(k, cell, vc, vr){
 // Coincidencias, en secuencia: se predice cada bola contra el grid y se ordenan
 // por el tick de llegada estimado (pase 1); en ese orden cada una reserva su
 // celda antes de predecir la siguiente (pase 2), así que dos fantasmas no
-// comparten celda. Las blancas entran en la secuencia y reservan, pero no se
-// dibujan: una que llega antes desplaza de verdad a una de color. El bonus no
-// entra. Aproximaciones aceptadas: no se predicen cascadas (lo que destella
-// cuenta como ocupado), se ignora `outBall`, y si en el pase 2 una bola acorta
-// camino no se reordena. La reserva vale desde ya, no desde que la otra llega:
+// comparten celda. El bonus no entra. Aproximaciones aceptadas: no se predicen
+// cascadas (lo que destella cuenta como ocupado), se ignora `outBall`, y si en
+// el pase 2 una bola acorta camino no se reordena. La reserva vale desde ya, no desde que la otra llega:
 // una bola que cruza ahora la celda que otra ocupará después se ve chocar con
 // ella, y su fantasma salta al salir de esa celda (≈ 1 de cada 1.000 bolas).
 // Sin caché: el grid cambia en demasiados sitios para invalidarla con garantías.
@@ -1813,7 +1811,6 @@ function stepGhosts(){
     if (gC < 0) continue;
     const i = idx(gC, gR);
     ghostOcc[i] = 1; ghostMark[ghostMarkN++] = i;
-    if (b.k === WHITE) continue;
     const g = ghosts[ghostN++];
     g.c = gC; g.r = gR; g.k = b.k;
   }
@@ -3673,7 +3670,7 @@ function bakeBalls(){
   const R0 = CELL*.45*BALL_R0K;
   ballSpr = {}; ghostSpr = {};
   JEWEL.forEach((j, k)=>{ ballSpr[k] = bakeGlass(j, R0, TL_COLOR); ghostSpr[k] = bakeGhost(j, R0); });
-  ballSpr[WHITE] = bakeGlass(JEWEL_WHITE, R0, TL_WHITE, pearlSheen);
+  ballSpr[WHITE] = bakeGlass(JEWEL_WHITE, R0, TL_WHITE, pearlSheen); ghostSpr[WHITE] = bakeGhost(JEWEL_WHITE, R0);
   ballSpr.bonus  = bakeGlass(JEWEL_BONUS, R0, TL_BONUS, boltGlyph);
   stoneAlb = bakeStoneAlbedo(R0);
   bakeCracks(R0);
