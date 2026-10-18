@@ -43,7 +43,8 @@ orientativo: 80 líneas.
   eso se rehornea. Se reproduce abriendo `chrome://gpucrash` en otra pestaña.
   Se pinta 1:1 en px de dispositivo, recortada a lo que ocupa: con DPR
   fraccionario, un canvas de `ceil(W·DPR)` pintado a `W` se reescala y se corre
-  medio píxel.
+  medio píxel. La excepción es lo que gira con el tablero (la capa de sombras):
+  se remuestrea por fuerza.
 - Cero peticiones externas (requisito Poki): fuente e imágenes van en el repo
   con ruta relativa, nada de CDN ni Google Fonts.
 
@@ -166,6 +167,10 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   comparan los campos de juego: las celdas llevan también estado solo de dibujo
   (`rew`). Un bug se
   demuestra primero reproduciéndolo en `HEAD`.
+- Un cambio que no debe alterar el dibujo se demuestra igual, comparando además
+  el canvas píxel a píxel (`getImageData`) en los mismos ticks: `HEAD` y la
+  versión nueva en dos iframes de la misma página, resultado por POST. Las
+  lecturas repetidas pasan el canvas a CPU: no sirven para cronometrar.
 - Audio: sin gesto no hay `AudioContext` y `sfx()` no hace nada. Para probarlo,
   `--autoplay-policy=no-user-gesture-required` y un `pointerup` en `document`.
   Decodificar y hornear no avanzan con tiempo virtual: resultado por POST. El

@@ -3677,6 +3677,7 @@ function bakeBalls(){
   stoneSpr = bakeStone();
   stoneLt = bakeStoneLight(R0);
   shadowSpr = bakeShadow(R0);
+  bakeShadowLayer();
 }
 
 // Aviso de salida: dos sprites por color, horneados aquí y dibujados con dos
@@ -3782,6 +3783,55 @@ function drawStoneWarn(age, x, y, r){
 function drawShadow(x, y, r, lift){
   const s = r/(CELL*.45)*(1 + .2*lift), o = 1 + 1.5*lift;
   sprite(shadowSpr, x + r*SHADOW_OFF[0]*o, y + r*SHADOW_OFF[1]*o, s);
+}
+// Las sombras del montón quieto van juntas en una capa: son discos simétricos y
+// la luz no gira, así que girar la capa con el tablero y desplazarla después da
+// lo mismo que pintarlas una a una, con una orden en vez de una por bola. Vive en
+// celda sin girar, centrada en la esfera, a DPR; se rehace solo cuando cambia
+// qué celdas la tienen. Fuera quedan las que se mueven (recolocación, pop), que
+// siguen en drawShadow(). No es 1:1: va girada y se remuestrea al pintarla.
+const SHADOW_STILL = 1e-3;            // en celdas: más cerca de su sitio, ya no se mueve
+let shadowCv, shadowHd, shadowBox = null, shadowDirty = true;
+const shadowOn = new Uint8Array(N*N);
+function bakeShadowLayer(){
+  shadowHd = Math.ceil((MASK_R*CELL + shadowSpr.d/2 + 1)*DPR);
+  shadowCv = bgCanvas(2*shadowHd, 2*shadowHd); shadowDirty = true;
+}
+function shadowStill(b, c, r, i){
+  return b.k >= 0 && !(flashT > 0 && flashSet.has(i)) &&
+    (b.vc === undefined || (Math.abs(b.vc - c) < SHADOW_STILL && Math.abs(b.vr - r) < SHADOW_STILL));
+}
+// Marca en shadowOn las celdas de la capa, la rehace si cambian y la pinta.
+function drawShadowLayer(rad){
+  let changed = shadowDirty;
+  for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+    const i = idx(c,r), b = grid[i], on = b && shadowStill(b, c, r, i) ? 1 : 0;
+    if (on !== shadowOn[i]){ shadowOn[i] = on; changed = true; }
+  }
+  const hd = shadowHd;
+  if (changed){
+    shadowDirty = false;
+    const x = shadowCv.getContext("2d"), d = shadowSpr.d, w = 2*hd;
+    x.setTransform(1,0,0,1,0,0); x.clearRect(0, 0, w, w);
+    x.setTransform(DPR,0,0,DPR,hd,hd); x.globalAlpha = SHADOW_A;
+    let lo = Infinity, hi = -Infinity, top = Infinity, bot = -Infinity;
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+      if (!shadowOn[idx(c,r)]) continue;
+      const lx = (c-C)*CELL, ly = (r-C)*CELL;
+      x.drawImage(shadowSpr, lx - d/2, ly - d/2, d, d);
+      lo = Math.min(lo, lx); hi = Math.max(hi, lx); top = Math.min(top, ly); bot = Math.max(bot, ly);
+    }
+    // la caja de lo pintado, en px de la capa: solo eso se copia en cada frame
+    const px = v => Math.max(0, Math.min(w, hd + v*DPR));
+    shadowBox = lo > hi ? null : [Math.floor(px(lo - d/2 - 1)), Math.floor(px(top - d/2 - 1)),
+                                  Math.ceil(px(hi + d/2 + 1)),  Math.ceil(px(bot + d/2 + 1))];
+  }
+  if (!shadowBox) return;
+  const [x0, y0, x1, y1] = shadowBox;
+  cx.save();
+  cx.translate(ox + rad*SHADOW_OFF[0], oy + rad*SHADOW_OFF[1]); cx.rotate(angleDraw);
+  cx.drawImage(shadowCv, x0, y0, x1-x0, y1-y0, (x0-hd)/DPR, (y0-hd)/DPR, (x1-x0)/DPR, (y1-y0)/DPR);
+  cx.restore();
 }
 
 // ─── estela de burbujas ────────────────────────────────────────────────────
@@ -4246,10 +4296,12 @@ function draw(alpha){
     b.dx0 === undefined ? b.x : lerp(b.dx0, b.x, alpha),
     b.dy0 === undefined ? b.y : lerp(b.dy0, b.y, alpha)));
   // Sombras en un pase previo, todas debajo de todas las bolas: pintadas con
-  // cada bola oscurecían a sus vecinas. La del pop crece con ella.
+  // cada bola oscurecían a sus vecinas. La del pop crece con ella. Todas son
+  // negras: el orden entre ellas no cambia nada, y la capa va primero.
+  drawShadowLayer(rad);
   cx.globalAlpha = SHADOW_A;
   for (let r=0;r<N;r++) for (let c=0;c<N;c++){
-    const b = grid[idx(c,r)]; if (!b || b.k<0) continue;   // el bulto del fondo ya lleva la suya
+    const b = grid[idx(c,r)]; if (!b || b.k<0 || shadowOn[idx(c,r)]) continue;   // el bulto del fondo ya lleva la suya
     const [x,y] = cellToScreen(b.vc===undefined?c:b.vc, b.vr===undefined?r:b.vr);
     drawShadow(x, y, flashT>0 && flashSet.has(idx(c,r)) ? popShadowR(rad) : rad, 0);
   }
