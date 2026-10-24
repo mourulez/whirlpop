@@ -178,11 +178,21 @@
   .gl use { color:var(--pearl); stroke:var(--ink); stroke-width:2.4; paint-order:stroke fill;
             stroke-linejoin:round; }
   .gl svg { display:block; height:max(44px, calc(var(--u)*12)); width:auto; overflow:visible; }
-  /* el vaivén reserva su recorrido: la fila no salta al moverse la mano */
-  .gl.sway { padding:0 calc(var(--u)*5); }
+  /* el vaivén reserva su recorrido (--amp): la fila no salta al moverse la mano */
+  .gl.sway { --amp:calc(var(--u)*5); padding:0 var(--amp); }
   .sway svg { animation:sway 1.6s ease-in-out infinite; }
-  @keyframes sway { 0%,100% { transform:translateX(calc(var(--u)*-5)); }
-                    50%     { transform:translateX(calc(var(--u)*5)); } }
+  @keyframes sway { 0%,100% { transform:translateX(calc(var(--amp)*-1)); }
+                    50%     { transform:translateX(var(--amp)); } }
+  /* La mano táctil del giro, más grande, más abajo y con más recorrido: pegada
+     al tip caía sobre el borde de la esfera y, con poco vaivén, se leía como
+     hacer girar el círculo en vez de arrastrar en horizontal. Así barre en recto
+     por dentro, entre el borde y el montón. En landscape el tip ya cae dentro de
+     la esfera: bajarla o agrandarla la llevaría encima del montón, y solo se
+     queda el recorrido. */
+  .gl.drag { --amp:calc(var(--u)*12); margin-top:calc(var(--u)*4.4); }
+  .gl.drag svg { height:max(56px, calc(var(--u)*15)); }
+  .wide .gl.drag { margin-top:0; }
+  .wide .gl.drag svg { height:max(44px, calc(var(--u)*12)); }
   /* las flechas siguen al ratón: → mientras va a la derecha, ← mientras vuelve */
   .k-r { animation:keyR 1.6s steps(1,end) infinite; }
   .k-l { animation:keyL 1.6s steps(1,end) infinite; }
@@ -702,7 +712,7 @@ function glyph(g, cls, uses, ring){
 function ctrlGlyphs(){
   const desk = inputMode === "desktop", dev = desk ? GLYPH.mouse : GLYPH.touch;
   if (ctrlPhase === "A")
-    return glyph(dev, "sway", [[dev.id]]) +
+    return glyph(dev, desk ? "sway" : "sway drag", [[dev.id]]) +
            (desk ? glyph(GLYPH.keys, "", [["g-right","k-r"], ["g-left","k-l"]]) : "");
   if (ctrlPhase === "C")
     return glyph(dev, "press", [[dev.id]], true) +
