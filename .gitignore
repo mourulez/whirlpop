@@ -9,9 +9,6 @@ dist/
 # Empaquetados
 *.zip
 
-# Banco de rendimiento: solo local
-perf/
-
 # Editores
 .vscode/
 .idea/

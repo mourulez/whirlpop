@@ -116,8 +116,7 @@ orientativo: 80 líneas.
   de los efectos) se hornea con `OfflineAudioContext` y en partida es un búfer.
   En directo solo el piano, el final de cada nota y la mezcla. Sintetizar al
   sonar llevaba el hilo de audio al 40 % de un núcleo, con cortes.
-- Sin reverb: era un tercio del hilo de audio y no se distinguía (el banco aún
-  la tiene). El match suena solo a burbujas, sin piano. Sin volumen: en la pausa,
+- Sin reverb: era un tercio del hilo de audio y no se distinguía. El match suena solo a burbujas, sin piano. Sin volumen: en la pausa,
   interruptores de música y efectos.
 
 ## Verificación
@@ -212,10 +211,8 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   pegados en `index.html`: no se carga en ejecución y se excluye de cualquier
   zip de distribución, no del repo. `fonts/` (Baloo 2, OFL) e `img/` sí van en el
   zip: el juego los carga.
-- `perf/` es el banco de rendimiento, solo local (en `.gitignore`).
 - `audio/` va en el zip (el juego carga `audio/piano.js`, que se regenera con
-  `python3 audio/build_piano.py`, con red). `bench-audio.html` es el banco de
-  escucha: en el repo, no en el zip.
+  `python3 audio/build_piano.py`, con red).
 - Chrome headless se cierra por PID (`taskkill /PID <pid> /T /F`), nunca por
   nombre: cerraría también el Chrome del usuario.
 - `to-do list.md` es del usuario y está excluido en `.git/info/exclude`: no tocarlo.

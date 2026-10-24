@@ -29,7 +29,6 @@ está en ese fichero.
 - `fonts/` — la tipografía Baloo 2 (subset latino) y su licencia SIL OFL.
 - `img/` — el logotipo de los telones de pausa y fin de partida.
 - `audio/` — las diez notas de piano de los efectos (`piano.js`, generado por `build_piano.py`) y sus créditos. El resto del audio se sintetiza en el navegador.
-- `bench-audio.html` — banco de escucha de la música y los efectos; no se carga al jugar.
 - `art/` — fuente editable de los glifos del tutorial; no se carga al jugar.
 - `CLAUDE.md` — reglas transversales, verificación y flujo de trabajo para Claude.
 - `.nojekyll` — evita que GitHub Pages procese el sitio con Jekyll.

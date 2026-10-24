@@ -229,14 +229,6 @@
          right:max(calc(var(--u)*2), env(safe-area-inset-right));
          display:flex; gap:max(8px, calc(var(--u)*2.4)); }
   .snd [aria-pressed="true"] .slash { display:none; }
-  /* medidor de fps (temporal, ver fpsMeter()): arriba al centro, entre los dos
-     botones y a su altura, en el hueco que dejó el rótulo de nivel */
-  #fps { position:fixed; left:50%; transform:translateX(-50%);
-         top:max(calc(var(--u)*1.6), env(safe-area-inset-top));
-         height:max(40px, calc(var(--u)*11)); display:flex; align-items:center;
-         font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-         font-size:max(11px, calc(var(--u)*2.6)); white-space:nowrap;
-         font-variant-numeric:tabular-nums; color:#5c6090; pointer-events:none; z-index:5; }
   /* sonda: JS no lee env(); resize() mide su alto para no meter la esfera
      bajo la muesca */
   #safe-top { position:fixed; top:0; left:0; width:0; height:env(safe-area-inset-top);
@@ -306,7 +298,6 @@
 </div>
 <div id="pz" class="wp wp--bare wp--icon tap"><svg viewBox="0 0 24 24"><rect class="ico" x="5" y="4" width="5" height="16" rx="2"/><rect class="ico" x="14" y="4" width="5" height="16" rx="2"/></svg></div>
 <div id="fs" class="wp wp--bare wp--icon tap"><svg viewBox="0 0 24 24"><path class="ico" d="M3 9V5a2 2 0 0 1 2-2h4v3H6v3zM15 3h4a2 2 0 0 1 2 2v4h-3V6h-3zM21 15v4a2 2 0 0 1-2 2h-4v-3h3v-3zM9 21H5a2 2 0 0 1-2-2v-4h3v3h3z"/></svg></div>
-<div id="fps"></div>
 <div id="safe-top"></div>
 <div id="over" class="ovl"><img class="wordmark" src="img/whirlpop-wordmark.webp" width="2096" height="611" alt="Whirlpop" draggable="false">
   <b class="ol" data-t="over"></b><span class="pts ol" id="fin">0</span>
@@ -2762,9 +2753,8 @@ for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
 addEventListener("keydown", e=>{ if (e.key==="f") toggleFS(); });
 
 // ─── audio ─────────────────────────────────────────────────────────────────
-// Música y efectos, portados de bench-audio.html: el banco es la referencia de la
-// partitura, los instrumentos, la mezcla y cada efecto, y lo que aquí suene
-// distinto que allí es un error de aquí. Todo se sintetiza salvo diez notas de
+// Música y efectos, portados del banco de escucha en el que se aprobaron (retirado;
+// está en el historial de git). Todo se sintetiza salvo diez notas de
 // piano (audio/piano.js, CC BY 3.0, ver audio/CREDITOS.md) para los efectos
 // tonales, que toman sus notas del acorde que suena (`curChord`).
 // Solo presentación. No escribe estado de partida ni gasta Math.random: lo que
@@ -4697,44 +4687,10 @@ function captureDrawPrev(){
   for (const o of orbs) o.a0 = o.age;
 }
 
-// ─── medidor de fps (temporal, fase de optimización) ───
-// Siempre a la vista, sin tecla ni opción: tiene que salir en el móvil tal cual.
-// Fuera de STR a propósito: es herramienta de desarrollo, no texto del juego.
-// Mide con el `now` de requestAnimationFrame, la marca del vsync, y no toca nada
-// de la partida. La cifra grande son los fps medios del último FPS_BUCKET; avg,
-// la media de las últimas FPS_WINDOW lecturas (5 s); min y max, el frame más
-// lento y el más rápido de esa misma ventana, pasados a fps: el min es el que
-// delata los tirones que la media se traga.
-const FPS_BUCKET = 500, FPS_WINDOW = 10;   // ms por lectura; lecturas en la ventana
-const fpsEl = document.getElementById("fps");
-let fpsPrev = null, fpsN = 0, fpsSum = 0, fpsLong = 0, fpsShort = Infinity;
-const fpsHist = [];                        // {n, sum, long, short} por lectura, la última al final
-function fpsMeter(now){
-  const d = fpsPrev === null ? 0 : now - fpsPrev; fpsPrev = now;
-  if (d <= 0) return;
-  fpsN++; fpsSum += d;
-  if (d > fpsLong) fpsLong = d;
-  if (d < fpsShort) fpsShort = d;
-  if (fpsSum < FPS_BUCKET) return;
-  fpsHist.push({ n: fpsN, sum: fpsSum, long: fpsLong, short: fpsShort });
-  if (fpsHist.length > FPS_WINDOW) fpsHist.shift();
-  let n = 0, sum = 0, long = 0, short = Infinity;
-  for (const h of fpsHist){
-    n += h.n; sum += h.sum;
-    if (h.long > long) long = h.long;
-    if (h.short < short) short = h.short;
-  }
-  fpsEl.textContent = Math.round(1000*fpsN/fpsSum) + " fps · avg " + Math.round(1000*n/sum)
-                    + " · min " + Math.round(1000/long)
-                    + " · max " + Math.round(1000/short);
-  fpsN = 0; fpsSum = 0; fpsLong = 0; fpsShort = Infinity;
-}
-
 let last = performance.now(), acc = 0;
 const scoreEl = document.getElementById("score"), overEl = document.getElementById("over");
 let shownScore = 0;
 function frame(now){
-  fpsMeter(now);
   let e = paused ? 0 : Math.max(0, Math.min(MAX_ELAPSED, (now-last)/1000)); last = now;
   const k = Math.round(e/SIM_DT);          // nunca a 0: a más de 1000 fps se congelaría
   if (k >= 1 && Math.abs(e - k*SIM_DT) < VSYNC_SNAP) e = k*SIM_DT;
@@ -4771,8 +4727,7 @@ function frame(now){
 // El tiempo pasado en otra pestaña no se simula: se descarta al volver. La marca
 // del primer frame puede ser anterior a este instante, y ahí `e` se satura a 0.
 document.addEventListener("visibilitychange", ()=>{
-  // la ausencia tampoco cuenta como un frame de varios segundos en el medidor
-  if (!document.hidden){ last = performance.now(); acc = 0; fpsPrev = null; }
+  if (!document.hidden){ last = performance.now(); acc = 0; }
 });
 
 resize(); reset(); requestAnimationFrame(frame);
