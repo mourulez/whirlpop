@@ -356,11 +356,11 @@ const STR = {
     it:"Tieni premuto il tasto sinistro e trascina il mouse, oppure usa le frecce per ruotare.",
     de:"Halte die linke Maustaste gedrückt und zieh, oder dreh mit den Pfeiltasten." },
   ctrlB: {
-    es:"Junta 3 bolas del mismo color para hacer match y eliminarlas.",
-    en:"Group 3 balls of the same color to make a match and clear them.",
-    fr:"Réunis 3 boules de la même couleur pour faire un match et les éliminer.",
-    it:"Unisci 3 palline dello stesso colore per fare match ed eliminarle.",
-    de:"Bring 3 Kugeln derselben Farbe zusammen, um ein Match zu machen und sie loszuwerden." },
+    es:"Junta 3 bolas para eliminarlas.",
+    en:"Group 3 balls to clear them.",
+    fr:"Réunis 3 boules pour les éliminer.",
+    it:"Unisci 3 palline per eliminarle.",
+    de:"Bring 3 Kugeln zusammen, um sie zu entfernen." },
   ctrlC_touch: {
     es:"Toca para que las bolas caigan de golpe.",
     en:"Tap to drop the balls at once.",
@@ -375,23 +375,23 @@ const STR = {
     de:"Klick oder drück nach unten, damit die Kugeln sofort fallen." },
 
   tip_stone: {
-    es:"Si tardas mucho, las bolas se vuelven piedra y ya no estallan.",
-    en:"Take too long and the balls turn to stone and won't pop anymore.",
-    fr:"Si tu traînes, les boules se changent en pierre et n'éclatent plus.",
-    it:"Se ci metti troppo, le palline diventano pietra e non scoppiano più.",
-    de:"Wenn du zu lange brauchst, werden die Kugeln zu Stein und platzen nicht mehr." },
+    es:"Si tardas mucho, las bolas se vuelven piedra y ya no se pueden eliminar.",
+    en:"Take too long and the balls turn to stone and can't be cleared anymore.",
+    fr:"Si tu traînes, les boules se changent en pierre et ne peuvent plus être éliminées.",
+    it:"Se ci metti troppo, le palline diventano pietra e non si possono più eliminare.",
+    de:"Wenn du zu lange brauchst, werden die Kugeln zu Stein und lassen sich nicht mehr entfernen." },
   tip_white: {
-    es:"Las bolas blancas estallan con cualquier match que las toque.",
-    en:"White balls pop with any match that touches them.",
-    fr:"Les boules blanches éclatent dès qu'un match les touche.",
-    it:"Le palline bianche scoppiano con qualsiasi match che le tocchi.",
-    de:"Weiße Kugeln platzen bei jedem Match, das sie berührt." },
+    es:"Las bolas blancas combinan con cualquier color.",
+    en:"White balls match with any color.",
+    fr:"Les boules blanches s'associent à n'importe quelle couleur.",
+    it:"Le palline bianche si abbinano a qualsiasi colore.",
+    de:"Weiße Kugeln passen zu jeder Farbe." },
   tip_gauge: {
-    es:"Cierra el anillo con matches y combos: saldrá una bomba que revienta todo lo que tenga alrededor.",
-    en:"Close the ring with matches and combos: you'll get a bomb that blasts everything around it.",
-    fr:"Ferme l'anneau avec des matchs et des combos pour obtenir une bombe qui fait tout sauter autour d'elle.",
-    it:"Chiudi l'anello con match e combo: arriverà una bomba che fa esplodere tutto ciò che ha intorno.",
-    de:"Schließ den Ring mit Matches und Combos: Dann kommt eine Bombe, die alles um sich herum sprengt." },
+    es:"Cierra el anillo juntando bolas y haciendo combos: una bomba hará explotar todo a su alrededor.",
+    en:"Close the ring by grouping balls and making combos: a bomb will blast everything around it.",
+    fr:"Ferme l'anneau en réunissant des boules et en faisant des combos : une bombe fera exploser tout ce qui l'entoure.",
+    it:"Chiudi l'anello unendo palline e facendo combo: una bomba farà esplodere tutto ciò che ha intorno.",
+    de:"Schließ den Ring, indem du Kugeln zusammenbringst und Combos machst: Eine Bombe sprengt alles um sich herum." },
   tip_purple: {
     es:"Nuevo color: púrpura.",
     en:"New color: purple.",
@@ -399,11 +399,11 @@ const STR = {
     it:"Nuovo colore: viola.",
     de:"Neue Farbe: Lila." },
   tip_sine: {
-    es:"Hay bolas que no caen. Cruzan el tablero de lado a lado.",
-    en:"Some balls don't fall. They cross the board from side to side.",
-    fr:"Certaines boules ne tombent pas. Elles traversent le plateau d'un côté à l'autre.",
-    it:"Alcune palline non cadono. Attraversano il tabellone da un lato all'altro.",
-    de:"Manche Kugeln fallen nicht. Sie ziehen von einer Seite zur anderen übers Feld." },
+    es:"¡Cuidado! Hay bolas que cruzan el tablero de lado a lado.",
+    en:"Watch out! Some balls cross the board from side to side.",
+    fr:"Attention ! Certaines boules traversent le plateau d'un côté à l'autre.",
+    it:"Attenzione! Alcune palline attraversano il tabellone da un lato all'altro.",
+    de:"Achtung! Manche Kugeln ziehen von einer Seite zur anderen übers Feld." },
   tip_sineH: {
     es:"Y también de arriba abajo.",
     en:"And from top to bottom, too.",
@@ -575,7 +575,7 @@ const SHADE = JEWEL.map(([,,s])=>hexRGB(s)), SHADE_WHITE = hexRGB(JEWEL_WHITE[2]
 const WHITE = 8, STONE = 9;                // fuera del rango de índices de color
 function numColors(){ return level >= 5 ? 5 : 4; }
 // El sistema de carga es la única mecánica que puede adelantarse al calendario:
-// con su tutorial ya leído está disponible desde el frame cero. El
+// fuera de la partida del tutorial está disponible desde el frame cero. El
 // resto de elementos conserva su reloj y solo pierde el tip. `gaugeEarly` se
 // congela en reset(), así que el desbloqueo nunca entra a mitad de partida.
 function gaugeOn(){ return level >= 4 || gaugeEarly; }
@@ -585,9 +585,8 @@ function gaugeOn(){ return level >= 4 || gaugeEarly; }
 // fuente de verdad y `level` es derivado. Ninguna mecánica conserva ya su propia
 // constante de tiempo —todas preguntan por el nivel—, así que mover un `at`
 // reordena la partida entera desde aquí. El último nivel es terminal.
-// `id` es la identidad estable de cada mecánica y no depende de la posición: el
-// almacén guarda los contadores de tutorial por `id`, así que reordenar niveles
-// moviendo un `at` no reasigna progresos a la mecánica equivocada.
+// `id` es la identidad estable de cada mecánica y no depende de la posición: de
+// él sale la clave de su tip en STR (`tip_<id>`).
 const LEVELS = [
   { n:1, id:"ctrl",   at:0 },   // guion propio en tres fases: ver ctrlText()
   // INVARIANTE: at < STONE_TIME. Antes del nivel 2 la edad de una bola no pasa de
@@ -597,15 +596,15 @@ const LEVELS = [
   // Puesta en escena, como la blanca en camino del nivel 3: al abrir, lo más viejo
   // del montón tiene 19 s y la primera piedra llegaría 15 s después, con el tip ya
   // olvidado. stoneDemo() adelanta unas pocas para que se petrifiquen mientras se
-  // lee. Solo con tip: quien ya se lo sabe juega la partida de siempre.
+  // lee. Solo con tip: fuera del tutorial se juega la partida de siempre.
   { n:2, id:"stone",  at:19,  intro(){ stoneDemo(); } },
   // el tutorial de las blancas llega con una blanca ya en camino: se lee el texto
   // mirando la cosa de la que habla, no esperando 8 s a que aparezca sola.
   { n:3, id:"white",  at:50,  on(){ spawnWhite(); whiteT = whiteInterval(); } },
   // Puesta en escena, no mecánica: el anillo aparece de golpe y barriendo hasta
   // GAUGE_INTRO, y el tip habla de cerrarlo mientras se ve cerrarse casi entero.
-  // Va en `intro` y no en `on` porque quien ya se sabe el anillo lo tiene desde
-  // el frame cero (ver gaugeOn()): ese salto sería un bonus regalado a mitad de
+  // Va en `intro` y no en `on` porque fuera del tutorial el anillo está desde el
+  // frame cero (ver gaugeOn()): ese salto sería un bonus regalado a mitad de
   // partida y sin texto que lo justifique.
   { n:4, id:"gauge",  at:90,  intro(){ gauge = gaugeL = GAUGE_INTRO; } },
   // El púrpura no puede esperar al azar: con 5 colores en la bolsa podría tardar
@@ -724,7 +723,7 @@ function setCtrlPhase(p){
 }
 // Sin tutorial de controles la partida es la de siempre: ni guion, ni montón
 // precargado, ni `t` retenido.
-function ctrlPending(){ return startLevel === 1 && !tutSeen("ctrl"); }
+function ctrlPending(){ return tutorial && startLevel === 1; }
 function setInputMode(m){
   if (inputModeFixed) return;
   inputModeFixed = true;
@@ -733,12 +732,13 @@ function setInputMode(m){
   if (ctrlPhase) renderCtrl();
 }
 const tipEl  = document.querySelector(".lvl-tip");
-// Único punto donde se decide si hay tip: tras una lectura completa el nivel
-// abre sin él. Con tipT a 0 y sin fase el bloque de fade de updateGame() no
-// tiene nada que hacer y setInputMode() tampoco reescribe nada.
+// Único punto donde se decide si hay tip: solo en la partida del tutorial (ver
+// `tutorial`), y en ella cada nivel saca el suyo al abrir. Con tipT a 0 y sin
+// fase el bloque de fade de updateGame() no tiene nada que hacer y
+// setInputMode() tampoco reescribe nada.
 function showLevel(){
   tipT = 0; ctrlPhase = null;
-  if (level === 1 ? !ctrlPending() : tutSeen(LEVELS[level-1].id)){
+  if (level === 1 ? !ctrlPending() : !tutorial){
     tipEl.classList.remove("on"); return;
   }
   if (level === 1) setCtrlPhase("A");
@@ -755,6 +755,11 @@ const cv = document.getElementById("c"), cx = cv.getContext("2d");
 let W,H,DPR,STAGE,PS,R,CELL,ox,oy,gaugeRad,teleRadIn;
 let grid, angle, angleT, anglePrev, flying, score, gauge, gaugeL, gaugeV, gaugeEpoch, gaugeFlashT, t, spawnT, dead, deadBall, outBall, nextSpawn, whiteT, lastColorAngle;
 let level, tipT, gaugeEarly, forceK, prevSine, forceSine;
+// Partida del tutorial: la primera de todas y la que se pide desde el telón (ver
+// replayTutorial()). Se fija en reset() y no cambia en toda la partida: en ella
+// sale el guion de controles y cada nivel saca su tip; en las demás, ninguno.
+// Quedarse a medias no deja nada pendiente: la siguiente partida ya es normal.
+let tutorial, tutReplay = false;
 // el aviso de la ficha que acaba de salir: solo lo lee el dibujo (ver drawTele())
 let teleOut;
 let dir, rotT, dragAcc, ptrDown, ptrId, ptrX, energy, lastMoveT, ptrT, ptrMoved, wheelAcc;
@@ -762,7 +767,7 @@ let heldKeys, keyDir, keyMode, keyHoldT, keyRamp, keyIdleT;
 let bestSaved;
 
 // ─── almacén local ─────────────────────────────────────────────────────────
-// Una sola clave versionada con el récord y los contadores de tutorial. El objeto
+// Una sola clave versionada con el récord y si el tutorial ya se hizo. El objeto
 // en memoria es la fuente de verdad durante la sesión y localStorage solo el
 // respaldo: lanza en Safari privado y puede estar bloqueado dentro del iframe de
 // un portal, así que las dos caras van envueltas y el fallo se traga en silencio.
@@ -770,28 +775,22 @@ let bestSaved;
 // igual, sin persistencia, hasta que se recarga.
 // El almacén es por origen, navegador y dispositivo, y no se sincroniza: móvil y
 // escritorio son dos progresos independientes que nunca se ven. Aceptado, no
-// defecto —quien prueba la demo en los dos ve los tutoriales en los dos.
+// defecto —quien prueba la demo en los dos ve el tutorial en los dos.
 const SAVE_KEY = "whirlpop.save";
 const BEST_KEY = "whirlpop.best";      // clave heredada: solo guardaba el récord
-// Cada tip sale una sola vez: una lectura completa lo da por visto. Para verlos
-// otra vez está "jugar de nuevo al tutorial" (ver replayTutorial()).
-const SAVE_V = 1, TUT_MAX = 1;
-const TUT_IDS = LEVELS.map(l => l.id);
+const SAVE_V = 1;
 
 function lsGet(k){ try { return localStorage.getItem(k); } catch(_){ return null; } }
 function lsSet(k,v){ try { localStorage.setItem(k,v); } catch(_){} }
 function lsDel(k){ try { localStorage.removeItem(k); } catch(_){} }
 
 // nada de lo que salga del almacén puede romper el arranque: un valor editado a
-// mano en devtools se satura o cae a 0, y un id desconocido no llega a entrar.
+// mano en devtools se satura o cae a 0.
 function clampInt(x, max){ return Math.max(0, Math.min(max, Math.floor(Number(x) || 0))); }
-// mus y sfx: los interruptores de la pausa, 0/1. Llegaron sin subir SAVE_V: un
-// guardado sin ellos los carga encendidos.
-function blankSave(){
-  const s = { v:SAVE_V, best:0, tut:{}, mus:1, sfx:1 };
-  for (const id of TUT_IDS) s.tut[id] = 0;
-  return s;
-}
+// tutDone: 0/1, la primera partida ya pasó del giro (ver updateGame()). mus y sfx:
+// los interruptores de la pausa, 0/1. Llegaron sin subir SAVE_V: un guardado sin
+// ellos los carga encendidos, y uno sin tutDone saca el tutorial.
+function blankSave(){ return { v:SAVE_V, best:0, tutDone:0, mus:1, sfx:1 }; }
 let save = blankSave(), saveDirty = false;
 
 function loadSave(){
@@ -800,8 +799,7 @@ function loadSave(){
   try { raw = JSON.parse(lsGet(SAVE_KEY)); } catch(_){}
   if (raw && raw.v === SAVE_V){
     save.best = clampInt(raw.best, Infinity);
-    const tut = raw.tut || {};
-    for (const id of TUT_IDS) save.tut[id] = clampInt(tut[id], TUT_MAX);
+    save.tutDone = clampInt(raw.tutDone, 1);
     save.mus = raw.mus === 0 ? 0 : 1;      // lo que falte o no valga, encendido
     save.sfx = raw.sfx === 0 ? 0 : 1;
     return;
@@ -817,14 +815,6 @@ function loadSave(){
 function flushSave(){ saveDirty = false; lsSet(SAVE_KEY, JSON.stringify(save)); }
 function flushIfDirty(){ if (saveDirty) flushSave(); }
 
-function tutCount(id){ return save.tut[id] || 0; }
-function tutSeen(id){ return tutCount(id) >= TUT_MAX; }
-function tutConsume(id){
-  if (!(id in save.tut) || save.tut[id] >= TUT_MAX) return;
-  save.tut[id]++;
-  flushSave();          // el instante importa: no depende de llegar al game over
-}
-
 // El récord se perdía al cerrar la pestaña en pleno récord, que en móvil —que es
 // donde se juega— pasa constantemente. Los dos eventos porque ninguno dispara de
 // forma fiable en todos los navegadores; entre los dos cubren cerrar la pestaña,
@@ -834,8 +824,8 @@ addEventListener("pagehide", flushIfDirty);
 document.addEventListener("visibilitychange", ()=>{ if (document.hidden) flushIfDirty(); });
 
 // Arranque del almacén con los dos atajos de prueba encima: ?reset=1 borra y
-// empieza limpio, ?tut=1 da todos los tutoriales por vistos —sin tips y con la
-// carga desbloqueada; un número mayor se satura—. Se quitan de la URL para que un F5 no los repita: jugar
+// empieza limpio, ?tut=1 da el tutorial por hecho —sin tips y con la carga
+// desbloqueada— y ?tut=0 lo trae de vuelta. Se quitan de la URL para que un F5 no los repita: jugar
 // seis minutos, o borrar la clave a mano en el móvil —donde eso exige depuración
 // remota—, no es forma de probar esto. ?nivel=N adelanta el reloj de partida al
 // `at` de ese nivel: ninguna lógica de juego se entera, porque toda la dificultad
@@ -847,7 +837,7 @@ let startLevel = 1;
   if (wipe){ lsDel(SAVE_KEY); lsDel(BEST_KEY); }
   loadSave();
   if (tut !== null){
-    for (const id of TUT_IDS) save.tut[id] = clampInt(tut, TUT_MAX);
+    save.tutDone = clampInt(tut, 1);
     flushSave();
   }
   if (lvl !== null) startLevel = Math.max(1, clampInt(lvl, LEVELS.length));
@@ -970,6 +960,7 @@ function reset(){
   clearGhosts();
   alarm = 0; flowPrev = 0;                   // angle vuelve a 0 más abajo: sin empujón
   grid[idx(C,C)] = { k:-1, age:0 };          // piedra central fija
+  tutorial = tutReplay || !save.tutDone; tutReplay = false;
   // ya asentadas, con la forma de place(): ni caen ni puntúan al aparecer
   if (ctrlPending())
     for (let r=0;r<N;r++) for (let c=0;c<N;c++){
@@ -986,10 +977,9 @@ function reset(){
   // `t`, así que basta con adelantar el reloj. La progresión se encadena sola en
   // el primer frame, ejecutando cada on() intermedio en orden.
   t = LEVELS[startLevel-1].at;
-  // el desbloqueo del anillo se congela aquí: si el tutorial de la carga se
-  // consume por tercera vez en esta partida, el adelanto entra en la siguiente.
-  // Cambiar las reglas en caliente, a mitad de partida, sería peor.
-  gaugeEarly = tutSeen("gauge");
+  // el desbloqueo del anillo se congela aquí, con la partida: cambiar las reglas
+  // en caliente, a mitad de partida, sería peor.
+  gaugeEarly = !tutorial;
   // el nivel 1 y su tip se pintan desde el frame cero
   level = 1; showLevel();
   { const aArc = Math.random()*Math.PI*2;
@@ -2352,7 +2342,7 @@ function easeVisual(dt){
 // Tutorial del nivel 2: las bolas de color más viejas de la superficie —con un
 // hueco jugable al lado, donde se ven y donde el jugador aún podría salvarlas— se
 // ponen a STONE_DEMO s de petrificarse, una tras otra dentro de la ventana de
-// lectura (6,3 s). Su aviso sale ya agrietado y avanza deprisa, y las piedras caen de
+// lectura (6,7 s). Su aviso sale ya agrietado y avanza deprisa, y las piedras caen de
 // una en una con el texto a la vista. Ninguna se rejuvenece, y lo que está
 // destellando no cuenta: va a estallar. Sin azar: se desempata por índice.
 const STONE_DEMO = [2, 3.5, 5];
@@ -2638,7 +2628,6 @@ function pause(){
   paused = true;
   setPts(document.getElementById("pfin"));
   showScrim(pauseEl);
-  syncTutAgain();
   syncPause();
   musicSync();
 }
@@ -2705,21 +2694,16 @@ tapBtn(pzEl, pauseByUser);
 tapBtn(document.getElementById("resume"), resume);
 tapBtn(document.getElementById("restart"), ()=>{ sfx("boton"); restart(); });
 tapBtn(document.getElementById("again"), ()=>{ sfx("boton"); restart(); });
-// Volver a ver los tutoriales: todos los contadores a cero y partida nueva desde
-// el nivel 1, con el guion de controles y su montón. Solo sale si hay algo que
-// repetir; se decide al abrir el telón, no en cada frame.
-const tutAgainEls = document.querySelectorAll(".tut-again");
-function syncTutAgain(){
-  const any = TUT_IDS.some(id => tutCount(id) > 0);
-  for (const e of tutAgainEls) e.style.display = any ? "" : "none";
-}
+// Volver a ver el tutorial: partida nueva desde el nivel 1 con el guion de
+// controles, su montón y todos los tips. No toca el almacén: solo la marca para
+// el reset() que viene, así que la partida siguiente vuelve a ser normal.
 function replayTutorial(){
-  for (const id of TUT_IDS) save.tut[id] = 0;
-  flushSave();
+  tutReplay = true;
   startLevel = 1;
   restart();
 }
-tutAgainEls.forEach(e => tapBtn(e, ()=>{ sfx("boton"); replayTutorial(); }));
+document.querySelectorAll(".tut-again")
+  .forEach(e => tapBtn(e, ()=>{ sfx("boton"); replayTutorial(); }));
 
 // ─── fullscreen ────────────────────────────────────────────────────────────
 // Se pregunta al navegador si puede, no qué dispositivo es: el iPhone dice que no
@@ -4566,7 +4550,13 @@ function updateGame(dt){
   // el giro que marcaron los listeners desde el tick anterior
   const turned = ctrlTurn; ctrlTurn = false;
   if (!dead){
-    if (turned && ctrlPhase === "A") setCtrlPhase("B");
+    if (turned && ctrlPhase === "A"){
+      setCtrlPhase("B");
+      // Único punto donde se da el tutorial por hecho: con el primer giro la
+      // partida ya ha empezado, y quien abre y cierra sin tocar nada lo vuelve a
+      // tener. Desde aquí, abandonarlo a medias no deja nada pendiente.
+      if (!save.tutDone){ save.tutDone = 1; flushSave(); }
+    }
     // en la fase A la partida todavía no ha empezado (ver ctrlText()): el reloj y
     // la cuenta de fichas esperan al primer giro; el giro sí corre
     const idle = ctrlPhase === "A";
@@ -4585,7 +4575,7 @@ function updateGame(dt){
     while (!ctrlPhase && level < LEVELS.length && t >= LEVELS[level].at){
       const entering = LEVELS[level];    // 0-indexado: la entrada del nivel que abre
       level++;
-      showLevel();                       // fija tipT, o lo deja a 0 si el tip ya está visto
+      showLevel();                       // fija tipT, o lo deja a 0 fuera del tutorial
       if (entering.on) entering.on();    // mecánica del nivel: corre siempre
       // la puesta en escena acompaña al texto: sin tip que leer no pinta nada
       if (entering.intro && tipT > 0) entering.intro();
@@ -4596,11 +4586,7 @@ function updateGame(dt){
       // el fade-out ocurre DESPUÉS de agotar la ventana de lectura, no dentro
       if (tipT <= 0){
         tipEl.classList.remove("on");
-        // Único punto de consumo del tutorial: la ventana se ha agotado entera y
-        // dentro de la partida. Morir con el tip a la vista no cuenta —con `dead`
-        // esto no corre— y no hay forma de sumar dos veces el mismo nivel. En el
-        // nivel 1 solo la fase C tiene ventana, y agotarla cierra el guion.
-        tutConsume(LEVELS[level-1].id);
+        // en el nivel 1 solo la fase C tiene ventana, y agotarla cierra el guion
         ctrlPhase = null;
       }
     }
@@ -4717,7 +4703,7 @@ function frame(now){
   }
   bestEl.textContent = bestScore;
   if (dead){
-    if (!bestSaved){ bestSaved = true; flushIfDirty(); syncTutAgain(); showScrim(overEl); }
+    if (!bestSaved){ bestSaved = true; flushIfDirty(); showScrim(overEl); }
     overEl.style.display="flex";
     setPts(document.getElementById("fin"));
     pzEl.style.visibility = "hidden";

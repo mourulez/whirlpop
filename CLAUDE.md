@@ -105,8 +105,11 @@ orientativo: 80 líneas.
   retiene en el `at` del nivel 2, que no abre hasta consumirlo. Los niveles no se
   solapan con él.
 - No hay colores nuevos: el nivel 7 es el último. El rosa (nivel 8) se quitó.
-- Cada tip sale una sola vez. Para verlos otra vez, "Jugar de nuevo al
-  tutorial" en pausa y en fin de partida (solo si hay algo visto).
+- El tutorial es una partida entera, no una lista de tips: la primera (se da
+  por hecha al primer giro) y la que se pide con "Jugar de nuevo al tutorial",
+  siempre visible en pausa y en fin de partida. Abandonarlo a medias no deja
+  nada pendiente ni se guarda progreso por tip: el almacén solo lleva `tutDone`.
+  Fuera de él no hay tips y el anillo está desde el frame cero.
 - Todo texto sale de la tabla única `STR`; el original es el castellano de
   España y el HTML solo lleva claves (`data-t`). Idioma: el primero de
   `navigator.languages` entre ES, EN, FR, IT y DE; si no, inglés. Sin selector
@@ -161,9 +164,9 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   `Navigator.prototype.languages`: `LANG` se decide al cargar.
 - Perfil nuevo por ejecución (`--user-data-dir`): el guardado de `localStorage`
   cambia la partida.
-- URL con `?reset&tut=1&nivel=N` (`tut` se satura: `?tut=3` vale igual). Con el tutorial de controles pendiente
-  (`?reset` solo) el tablero arranca con un montón precargado y la partida no
-  corre hasta que la prueba gire.
+- URL con `?reset&tut=1&nivel=N` (`tut=1` da el tutorial por hecho, `tut=0` lo
+  trae). En la partida del tutorial (`?reset` solo) el tablero arranca con un
+  montón precargado y la partida no corre hasta que la prueba gire.
 - Un grid montado a mano tiene que estar asentado (`gravityPass()` no mueve
   nada): si no, el primer destello lo recoloca y la prueba mide otra cosa.
 - Un cambio que no debe alterar el juego se demuestra con partidas sembradas
