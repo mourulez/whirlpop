@@ -18,9 +18,11 @@
 <meta property="og:type" content="website">
 <!-- la única fuente, servida con el juego: cero peticiones a otros orígenes -->
 <link rel="preload" href="fonts/baloo2-latin.woff2" as="font" type="font/woff2" crossorigin>
-<!-- las diez notas de piano de los efectos (ver "audio"). Un <script> y no un
-     fetch: así carga también abriendo el fichero en local -->
+<!-- las diez notas de piano de los efectos y la música y las texturas ya
+     horneadas (ver "audio"). Un <script> y no un fetch: así carga también
+     abriendo el fichero en local -->
 <script src="audio/piano.js" defer></script>
+<script src="audio/baked.js" defer></script>
 <style>
   /* Baloo 2 (SIL OFL 1.1, fonts/OFL.txt), subset latino con el eje wght 400–800.
      Familia con nombre propio para no casar con una Baloo instalada en el sistema. */
@@ -2753,9 +2755,10 @@ addEventListener("keydown", e=>{ if (e.key==="f") toggleFS(); });
 
 // ─── audio ─────────────────────────────────────────────────────────────────
 // Música y efectos, portados del banco de escucha en el que se aprobaron (retirado;
-// está en el historial de git). Todo se sintetiza salvo diez notas de
-// piano (audio/piano.js, CC BY 3.0, ver audio/CREDITOS.md) para los efectos
-// tonales, que toman sus notas del acorde que suena (`curChord`).
+// está en el historial de git). Las notas de la música y las texturas de los
+// efectos llegan ya renderizadas (audio/baked.js, ver "horneado"); el piano son
+// diez muestras (audio/piano.js, CC BY 3.0, ver audio/CREDITOS.md) para los
+// efectos tonales, que toman sus notas del acorde que suena (`curChord`).
 // Solo presentación. No escribe estado de partida ni gasta Math.random: lo que
 // el banco sortea —humanizar, burbujas, golpes fantasma, ruido— sale de
 // `arand`. La partida dispara efectos con sfx(nombre, arg), que no devuelve nada
@@ -2782,7 +2785,7 @@ const mtof  = m => 440*Math.pow(2,(m-69)/12);
 // (ganancia al cuadrado) y efectos 90 % (1,6 por el cuadrado)
 const MASTER_G = 0.8, MUS_G = 0.5*0.5, SFX_G = 1.6*0.9*0.9;
 
-let actx = null, aWake = false, pianoBufs = [], pianoP = null, noiseBuf = null;
+let actx = null, aWake = false, pianoBufs = [], pianoP = null;
 let master, sfxIn, musicLP = null, duck = null, musicOut = null;
 const LAY = {}, LAYK = ['chords','mel','bass','drums'];   // capas de la música
 let curChord = "C69";
@@ -2863,8 +2866,7 @@ const MELMAP = new Map(MEL.map(e => [e[0]*16+e[1], e]));
 function link(...ns){ for (let i=1;i<ns.length;i++) ns[i-1].connect(ns[i]); return ns[ns.length-1]; }
 function satCurve(k){ const n=2048,c=new Float32Array(n),t=Math.tanh(k);
   for(let i=0;i<n;i++){const x=i/(n-1)*2-1; c[i]=Math.tanh(k*x)/t;} return c; }
-// lo común: general con compresor y bus de efectos. El ruido se genera aquí, una
-// vez, en el desbloqueo.
+// lo común: general con compresor y bus de efectos
 function buildGraph(){
   master=actx.createGain(); master.gain.value=MASTER_G;
   const comp=actx.createDynamicsCompressor();
@@ -2872,9 +2874,6 @@ function buildGraph(){
   link(master, comp, actx.destination);
 
   sfxIn=actx.createGain(); sfxIn.gain.value=SFX_G; sfxIn.connect(master);
-
-  noiseBuf=actx.createBuffer(1,actx.sampleRate,actx.sampleRate);
-  const nd=noiseBuf.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=arand()*2-1;
 }
 // la cadena de la música, la primera vez que suena: con la música apagada no
 // existe. Paso-alto, filtro del peligro, saturación, ducking y salida.
@@ -2890,7 +2889,7 @@ function buildMusic(){
 }
 function b64(s){ const bin=atob(s), u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return u.buffer; }
 // con callbacks: Safari anterior a 14.1 no devuelve promesa
-function decode(ab){ return new Promise((res,rej)=>{ const p=actx.decodeAudioData(ab,res,rej); if(p&&p.catch) p.catch(()=>{}); }); }
+function decode(ab, c=actx){ return new Promise((res,rej)=>{ const p=c.decodeAudioData(ab,res,rej); if(p&&p.catch) p.catch(()=>{}); }); }
 // Arranque real de la muestra: primer instante que pasa de 0,01, menos 2 ms. Absorbe
 // el silencio del original y el retardo del codificador, que cada navegador trata a su modo.
 function onset(buf){ const d=buf.getChannelData(0); let i=0; while(i<d.length && Math.abs(d[i])<.01) i++;
@@ -2908,7 +2907,7 @@ const aNow = () => actx.currentTime + .005;
 
 // ── instrumentos ──
 // Los instrumentos son los del banco, pero no se sintetizan al sonar: cada nota
-// de la música y cada textura de los efectos se hornea una vez (ver "horneado")
+// de la música y cada textura de los efectos llega horneada (ver "horneado")
 // y en partida se reproduce el búfer. Sintetizada, una nota eran hasta siete
 // nodos vivos con su automatización, y la música sola tenía el hilo de audio al
 // 40 % de un núcleo, con cortes; horneada es un búfer y una ganancia. En directo
@@ -2955,152 +2954,78 @@ function tex(name,t){ oneShot(BAKED.tex[name],t,sfxIn); }
 function duckMusic(t,depth,hold){ if(!duck) return;
   duck.gain.cancelScheduledValues(t); duck.gain.setTargetAtTime(depth,t,.02); duck.gain.setTargetAtTime(1,t+hold,.3); }
 
-// ── síntesis ──
-// El diseño de sonido del banco, tal cual. Solo se oye a través del horneado:
-// mientras hornea, actx, sfxIn y las capas apuntan al contexto diferido.
-function partial(f,t,v,decay,dest){
-  const o=actx.createOscillator(), g=actx.createGain(); o.type='sine'; o.frequency.value=f;
-  g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(v,t+.003); g.gain.setTargetAtTime(0,t+.003,decay/4);
-  link(o, g, dest); o.start(t); o.stop(t+decay*1.2+.05);
-}
-function envGain(g,t,v,dur,att=.002){ g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(Math.max(v,.0002),t+att); g.gain.exponentialRampToValueAtTime(.0001,t+dur); }
-function noiseHit(t,dur,v,type,freq,dest,q=.7){
-  const s=actx.createBufferSource(), f=actx.createBiquadFilter(), g=actx.createGain();
-  s.buffer=noiseBuf; f.type=type; f.frequency.value=freq; f.Q.value=q; envGain(g,t,v,dur);
-  link(s, f, g, dest); s.start(t,arand()*.5); s.stop(t+dur+.03); return f;
-}
-function tone(t,type,f0,f1,dur,v,dest){
-  const o=actx.createOscillator(), g=actx.createGain(); o.type=type;
-  o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+dur*.8);
-  envGain(g,t,v,dur,.004); link(o, g, dest); o.start(t); o.stop(t+dur+.03);
-}
-// Burbuja: chirp ascendente corto (resonancia de Minnaert). No es un evento: con
-// ella están hechos match, combo, hard drop, bomba y recolocación.
-function bubble(t,size=.5,vol=.22,dest=sfxIn){
-  const f0=(900-size*650)*arnd(.85,1.15), dur=.04+size*.09, o=actx.createOscillator(), g=actx.createGain();
-  o.type='sine'; o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f0*(1.8+size*.8),t+dur);
-  envGain(g,t,vol,dur,.003); link(o, g, dest); o.start(t); o.stop(t+dur+.03);
-}
-function bubbles(t,n,spread,s0,s1,vol,dest=sfxIn){ for(let i=0;i<n;i++) bubble(t+arand()*spread,arnd(s0,s1),vol*arnd(.6,1),dest); }
-const SYN={
-  vibes(f,t,v,dur,dest){ const end=t+Math.max(dur,.05)+.15;
-    const vg=actx.createGain(), dmp=actx.createGain(), lfo=actx.createOscillator(), lg=actx.createGain();
-    vg.gain.value=.75; lfo.frequency.value=5.2; lg.gain.value=.25; link(lfo, lg, vg.gain);
-    dmp.gain.setValueAtTime(1,end); dmp.gain.setTargetAtTime(0,end,.12); link(vg, dmp, dest);
-    partial(f,t,v,2.2,vg); partial(f*4,t,v*.12,.4,vg); lfo.start(t); lfo.stop(end+1); },
-  rhodes(f,t,v,dur,dest){ const end=t+dur;
-    const car=actx.createOscillator(), mod=actx.createOscillator(), mg=actx.createGain(),
-          tine=actx.createOscillator(), tg=actx.createGain(), g=actx.createGain();
-    car.frequency.value=f; mod.frequency.value=f; tine.frequency.value=f*14;
-    mg.gain.setValueAtTime(f*1.8,t); mg.gain.setTargetAtTime(f*.35,t,.25);
-    tg.gain.setValueAtTime(f*1.2,t); tg.gain.setTargetAtTime(0,t,.02);
-    link(mod, mg, car.frequency); link(tine, tg, car.frequency);
-    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(v,t+.004);
-    g.gain.setTargetAtTime(v*.3,t+.004,.6); g.gain.setTargetAtTime(0,end,.12);
-    link(car, g, dest); [car,mod,tine].forEach(x=>{x.start(t); x.stop(end+.8);}); },
-  bass(midi,t,dur,vel){
-    const f=mtof(midi), o=actx.createOscillator(), o2=actx.createOscillator(), g2=actx.createGain(),
-          lp=actx.createBiquadFilter(), g=actx.createGain();
-    o.type='sine'; o.frequency.value=f; o2.type='triangle'; o2.frequency.value=f; g2.gain.value=.45;
-    lp.type='lowpass'; lp.frequency.value=420;
-    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vel,t+.012);
-    g.gain.setTargetAtTime(vel*.7,t+.03,.15); g.gain.setTargetAtTime(0,t+dur,.06);
-    o.connect(lp); link(o2, g2, lp); link(lp, g, LAY.bass);
-    o.start(t); o2.start(t); o.stop(t+dur+.5); o2.stop(t+dur+.5); },
-  kick(t,v){ tone(t,'sine',120,58,.32,v,LAY.drums); noiseHit(t,.012,v*.25,'lowpass',2500,LAY.drums); },
-  snare(t,v){ noiseHit(t,.2,v*.55,'bandpass',1900,LAY.drums,.8); tone(t,'triangle',210,160,.09,v*.5,LAY.drums); },
-  hat(t,v,open){ noiseHit(t,open?.22:.045,v*.22,'highpass',7500,LAY.drums); }
-};
-
 // ── horneado ──
-// Lo que suena igual cada vez se renderiza una vez en un OfflineAudioContext
-// —mono, a la frecuencia del contexto real—, fuera del hilo principal. Las notas
-// se hornean sin apagar, a velocidad 1, con la duración justa para cubrir la más
-// larga a 96 BPM con su cola; los golpes, a cada velocidad que usa la partitura
-// (su envolvente no es lineal); lo que se sortea —ruido, burbujas—, en varias
-// variantes. Cada parte se hornea la primera vez que hace falta y con su
-// interruptor encendido: las texturas, al desbloquear o al encender los efectos;
-// la música, cuando tiene que sonar, y arranca al terminar. Lo que aún no está
-// horneado no suena.
-const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+// Lo que suena igual cada vez —cada nota de la música, cada golpe de la batería
+// y cada textura de los efectos— llega ya renderizado en audio/baked.js: dos MP3
+// mono a 48 kHz, música y efectos, con sus piezas en fila. Lo genera
+// audio/build_baked.py en Chrome headless, con la síntesis del banco
+// (audio/build_baked.js); un cambio de sonido se hace allí y se regenera.
+// Cada MP3 se decodifica al cargar la página, con su interruptor encendido (los
+// efectos, también al encenderlos), en un contexto diferido a 48 kHz: no pide
+// gesto, así que al primer toque la música ya está y arranca con él. En un
+// dispositivo a otra frecuencia el nodo remuestrea al sonar, como ya hace con el
+// `wow`. Horneando la síntesis en el gesto, la primera nota llegaba de 0,8 a
+// 3,5 s después en un PC; decodificando en el gesto, a 0,4 s. Lo que aún no está
+// no suena; si algo falla, se reintenta en el gesto siguiente.
 const BAKED = { vibes:{}, rhodes:{}, bass:{}, drums:{}, tex:{} };
-const TEX_VARIANTS = 3, DRUM_VARIANTS = 2;
-let musReady = false, musBaking = false, texBaking = false;
-// [duración, receta]; la receta programa desde t, en sfxIn
-const TEX = {
-  match:     [.45, t=>bubbles(t+.01,7,.22,.15,.6,.16)],
-  orbe:      [.15, t=>bubble(t,.1,.07)],
-  anillo:    [.7,  t=>bubbles(t,10,.5,.05,.35,.1)],
-  nivel:     [.95, t=>bubbles(t+.3,8,.5,.05,.3,.1)],
-  aterrizaje:[.25, t=>{ bubble(t,.95,.22); tone(t,'sine',95,55,.09,.3,sfxIn); }],
-  giro:      [.06, t=>noiseHit(t,.02,.09,'bandpass',2600,sfxIn,1.5)],
-  // ráfaga de burbujas que crecen —y bajan de tono— mientras la bola se hunde
-  drop:      [.45, t=>{ for(let i=0;i<12;i++){ const u=i/11; bubble(t+u*.26+arnd(0,.02),.1+.55*u*arnd(.85,1.15),.15*arnd(.7,1)); } }],
-  bomba:     [.85, t=>{ tone(t,'sine',85,32,.55,.6,sfxIn); noiseHit(t,.45,.35,'lowpass',600,sfxIn); bubbles(t+.02,18,.6,.1,1,.2); }],
-  petri:     [.8,  t=>{ let x=0; for(let i=0;i<22;i++){ x+=.05*Math.pow(.9,i); noiseHit(t+x,.006,.18,'bandpass',arnd(900,2600),sfxIn,2); }
-                         tone(t,'sine',196,98,.7,.12,sfxIn); }],
-  recoloca:  [.45, t=>{ const f=noiseHit(t,.28,.1,'bandpass',700,sfxIn,1);
-                         f.frequency.setValueAtTime(700,t); f.frequency.exponentialRampToValueAtTime(1600,t+.26); bubbles(t+.05,5,.25,.1,.4,.1); }],
-  boton:     [.05, t=>noiseHit(t,.012,.05,'highpass',4000,sfxIn)],
-};
-for (let c=1; c<=6; c++) TEX['combo'+c] = [.45, t=>bubbles(t,4+c*2,.25,.1,.5,.13)];
-// las velocidades de la batería en playStep()
-const DRUM_V = { k:[.55,.45,.3], s:[.38,.22,.08], h:[.3,.2,.18,.12,.11], ho:[.2] };
-
-// Mientras se monta el grafo, actx, sfxIn y las capas apuntan al contexto
-// diferido. Es síncrono: la partida no corre en medio. null si no se pudo.
-function bakeRender(len, fn){
-  const off = new OAC(1, Math.max(1, Math.ceil(len*actx.sampleRate)), actx.sampleRate);
-  const real = actx, rs = sfxIn, rl = LAYK.map(k => LAY[k]);
-  actx = off; sfxIn = off.destination; for (const k of LAYK) LAY[k] = off.destination;
-  try { fn(0); } catch(_){ return Promise.resolve(null); }
-  finally { actx = real; sfxIn = rs; LAYK.forEach((k,i) => { LAY[k] = rl[i]; }); }
-  return new Promise(res => { off.oncomplete = e => res(e.renderedBuffer);
-    const p = off.startRendering(); if (p && p.then) p.then(res, () => res(null)); });
+const BAKED_MANY = { drums:true, tex:true };   // con variantes: oneShot() sortea
+const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+let bakedCtx = null, musReady = false, musLoading = false, texLoading = false;
+// El chirrido con el que empieza cada MP3: barrido lineal de 500 Hz a 8 kHz con
+// ventana de Hann, de autocorrelación con un solo pico. build_baked.js lo graba
+// con esta misma función.
+function syncChirp(n, sr){
+  const c = new Float32Array(n), T = n/sr;
+  for (let i=0;i<n;i++){ const t = i/sr;
+    c[i] = .5*Math.sin(2*Math.PI*(500*t + 7500*t*t/(2*T))) * .5*(1-Math.cos(2*Math.PI*i/(n-1))); }
+  return c;
 }
-// [destino, clave, duración, receta, variantes]. El grafo de cada uno se monta
-// en el hilo principal (unos 3 ms, 13 el mayor): cada uno en su propia tarea, para
-// que ninguna se alargue, y como mucho cuatro renderizando a la vez.
-async function bakeList(list){
-  const busy = new Set();
-  for (const [dst, key, len, fn, many] of list){
-    await new Promise(r => setTimeout(r));
-    while (busy.size >= 4) await Promise.race(busy);
-    const p = bakeRender(len, fn).then(b => {
-      if (b){ if (many) (dst[key] = dst[key] || []).push(b); else dst[key] = b; }
-      busy.delete(p);
-    });
-    busy.add(p);
+// Cada navegador trata a su modo el retardo del codificador MP3: se busca el
+// chirrido en vez de suponerlo, y todo se corre lo mismo. La misma correlación
+// da la ganancia: el chirrido se grabó a amplitud conocida y pasó por lo mismo
+// que las piezas (el techo de pico de build_baked.py y el MP3 mono de LAME, que
+// decodifica al 95 % en Chrome), así que se deshace todo, sea cual sea el
+// decodificador. Sin chirrido reconocible no se carga nada.
+function unpack(B, part, buf){
+  const d = buf.getChannelData(0), n = B.sync[1], at = B.sync[0], ref = syncChirp(n, B.sr);
+  let e = 0; for (let i=0;i<n;i++) e += ref[i]*ref[i];
+  let best = -Infinity, pos = at;
+  for (let p=0, hi=Math.min(at+6000, d.length-n); p<=hi; p++){
+    let s = 0; for (let i=0;i<n;i++) s += d[p+i]*ref[i];
+    if (s > best){ best = s; pos = p; }
   }
-  await Promise.all(busy);
-}
-function bakeTex(){
-  if (texBaking || !OAC || !save.sfx) return;
-  texBaking = true;
-  const list = [];
-  for (let v = 0; v < TEX_VARIANTS; v++) for (const n in TEX) list.push([BAKED.tex, n, TEX[n][0], TEX[n][1], true]);
-  bakeList(list).catch(()=>{});
-}
-function bakeMusic(){
-  if (musBaking || !OAC) return;
-  musBaking = true;
-  const B = BAKED, list = [];
-  for (let v = 0; v < DRUM_VARIANTS; v++){
-    for (const x of DRUM_V.k)  list.push([B.drums, 'k'+x,     .35, t=>SYN.kick(t,x), true]);
-    for (const x of DRUM_V.s)  list.push([B.drums, 's'+x,     .25, t=>SYN.snare(t,x), true]);
-    for (const x of DRUM_V.h)  list.push([B.drums, 'h'+x,     .1,  t=>SYN.hat(t,x,false), true]);
-    for (const x of DRUM_V.ho) list.push([B.drums, 'h'+x+'o', .25, t=>SYN.hat(t,x,true), true]);
+  if (best < .5*e) throw new Error("sin sincronía");
+  const shift = pos - at, g = e/best;
+  for (const [grp, key, o, len] of part.parts){
+    const s = o + shift, L = Math.min(len, d.length - s);
+    const b = bakedCtx.createBuffer(1, L, B.sr), ch = b.getChannelData(0);
+    for (let i=0;i<L;i++) ch[i] = d[s+i]*g;
+    if (BAKED_MANY[grp]) (BAKED[grp][key] = BAKED[grp][key] || []).push(b); else BAKED[grp][key] = b;
   }
-  const vib = new Set(), rh = new Set(), bass = new Set();
-  for (const m of MEL){ vib.add(m[2]); if (m[5]) vib.add(m[2]-1); }
-  for (const c of Object.values(CHORDS)){ c.v.forEach(x => rh.add(x)); for (const d of [0,7,12]) bass.add(c.bass+d); }
-  for (const b of WALK){ const nb = CHORDS[PROG[(b+1)%32][0][1]].bass; for (let d=1; d<=4; d++) bass.add(nb+d); }
-  // dur largo: el apagado de la síntesis cae fuera del búfer
-  for (const m of vib)  list.push([B.vibes,  m, 1.3,  t=>SYN.vibes(mtof(m),t,1,2,sfxIn)]);
-  for (const m of rh)   list.push([B.rhodes, m, 1.15, t=>SYN.rhodes(mtof(m),t,1,2,sfxIn)]);
-  for (const m of bass) list.push([B.bass,   m, .85,  t=>SYN.bass(m,t,2,1)]);
-  bakeList(list).then(() => { musReady = true; musicSync(); }, () => {});
 }
+// cada uno en su tarea: pasar el base64 a binario y trocear son decenas de ms
+function loadBaked(name, done, fail){
+  setTimeout(() => {
+    try {
+      const B = window.WHIRLPOP_BAKED;
+      if (!B || !OAC){ fail(); return; }
+      if (!bakedCtx) bakedCtx = new OAC(1, 1, B.sr);
+      decode(b64(B[name].mp3), bakedCtx).then(buf => { unpack(B, B[name], buf); done(); }).catch(fail);
+    } catch(_){ fail(); }
+  });
+}
+function loadMusic(){
+  if (musLoading || !save.mus) return;
+  musLoading = true;
+  loadBaked("music", () => { musReady = true; musicSync(); }, () => { musLoading = false; });
+}
+function loadTex(){
+  if (texLoading || !save.sfx) return;
+  texLoading = true;
+  loadBaked("tex", () => {}, () => { texLoading = false; });
+}
+// los <script defer> (audio/baked.js) ya han corrido al llegar este evento
+document.addEventListener("DOMContentLoaded", () => { loadMusic(); loadTex(); });
 
 // ── secuenciador ──
 // Peligro = `alarm`, la misma que calienta el fondo (0..1, ya suavizada): tempo,
@@ -3165,7 +3090,7 @@ function gainTo(p, v, dur){
   p.cancelScheduledValues(t); p.setValueAtTime(p.value, t); p.linearRampToValueAtTime(v, t+dur);
 }
 function musicStart(){
-  if (!musReady){ bakeMusic(); return; }       // arranca al terminar de hornear
+  if (!musReady){ loadMusic(); return; }       // arranca al terminar de decodificar
   if (!musicOut) buildMusic();
   mFade = 0; mNext = actx.currentTime + .08;
   gainTo(musicOut.gain, MUS_G, .08);
@@ -3245,10 +3170,9 @@ function audioUnlock(){
     if (fresh){
       try { if (navigator.audioSession) navigator.audioSession.type = "ambient"; } catch(_){}
       try { actx = new AC({ latencyHint:"interactive" }); } catch(_){ actx = new AC(); }
-      buildGraph();
       // en el gesto solo el contexto y el grafo: crear el contexto ya bloquea unos
-      // 100 ms. Las texturas se hornean después, en tareas aparte
-      setTimeout(bakeTex);
+      // 100 ms. Lo horneado ya se decodificó al cargar
+      buildGraph();
     }
     if (fresh || actx.state !== "running"){
       const p = actx.resume(); if (p && p.catch) p.catch(()=>{});
@@ -3258,7 +3182,8 @@ function audioUnlock(){
       aWake = true; setTimeout(()=>{ aWake = false; });
     }
     setTimeout(loadPiano);
-    musicSync();                      // si toca sonar, hornea la música y arranca al acabar
+    musicSync();                      // si toca sonar, arranca (o reintenta decodificarla)
+    loadTex();                        // si falló al cargar
   } catch(_){}
 }
 for (const ev of ["pointerup", "touchend", "keydown"]) document.addEventListener(ev, audioUnlock, true);
@@ -3281,7 +3206,7 @@ function syncSnd(){
 }
 syncSnd();
 tapBtn(musBtn, ()=>{ save.mus = save.mus ? 0 : 1; flushSave(); syncSnd(); musicSync(); sfx("boton"); });
-tapBtn(sfxBtn, ()=>{ save.sfx = save.sfx ? 0 : 1; flushSave(); syncSnd(); if (actx) bakeTex(); sfx("boton"); });
+tapBtn(sfxBtn, ()=>{ save.sfx = save.sfx ? 0 : 1; flushSave(); syncSnd(); loadTex(); sfx("boton"); });
 
 // ─── fondo ─────────────────────────────────────────────────────────────────
 // Lava que recorre gamas en bucle y se calienta con el peligro, burbujas, el

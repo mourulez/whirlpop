@@ -18,6 +18,7 @@ Línea de crédito para README, ficha del portal o créditos del juego:
 
 ## Resto del audio
 
-Música, instrumentos (vibráfono, Rhodes, bajo, batería), reverb y efectos de
-textura se sintetizan en el navegador en tiempo real. Composición y diseño de
-sonido originales para Whirlpop.
+Música, instrumentos (vibráfono, Rhodes, bajo, batería) y efectos de textura
+se sintetizan con Web Audio (`build_baked.js`) y se renderizan una vez a MP3
+(`baked.js`, generado por `build_baked.py`). Composición y diseño de sonido
+originales para Whirlpop.

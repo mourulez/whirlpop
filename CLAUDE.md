@@ -116,9 +116,11 @@ orientativo: 80 líneas.
   ni forma de forzarlo. Las metas (`description`, `og:`) van fijas en inglés:
   quien las lee no ejecuta JS. "Match" y "combo" no se traducen.
 - Audio: todo lo que suena igual cada vez (notas de la música, golpes, texturas
-  de los efectos) se hornea con `OfflineAudioContext` y en partida es un búfer.
-  En directo solo el piano, el final de cada nota y la mezcla. Sintetizar al
-  sonar llevaba el hilo de audio al 40 % de un núcleo, con cortes.
+  de los efectos) se hornea una vez, al construir, y va en el repo como MP3
+  (`audio/baked.js`); el juego lo decodifica al cargar, sin gesto, y en partida
+  es un búfer. En directo solo el piano, el final de cada nota y la mezcla.
+  Sintetizar al sonar llevaba el hilo de audio al 40 % de un núcleo, con cortes;
+  hornear en el navegador retrasaba la primera nota de 0,8 a 3,5 s en un PC.
 - Sin reverb: era un tercio del hilo de audio y no se distinguía. El match suena solo a burbujas, sin piano. Sin volumen: en la pausa,
   interruptores de música y efectos.
 
@@ -180,9 +182,9 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
   lecturas repetidas pasan el canvas a CPU: no sirven para cronometrar.
 - Audio: sin gesto no hay `AudioContext` y `sfx()` no hace nada. Para probarlo,
   `--autoplay-policy=no-user-gesture-required` y un `pointerup` en `document`.
-  Decodificar y hornear no avanzan con tiempo virtual: resultado por POST. El
-  Rhodes no se compara muestra a muestra (su FM cambia con el instante de
-  arranque): por espectro y envolvente.
+  Decodificar no avanza con tiempo virtual: resultado por POST. Lo horneado se
+  compara con el PCM que guarda `build_baked.py --keep` por espectro y
+  envolvente, no muestra a muestra: es MP3.
 
 ## Forma de trabajar
 
@@ -208,14 +210,18 @@ No hay tests ni build. Se valida ejecutando el juego real en Chrome headless:
 
 ## Entorno
 
-- Windows, con Git Bash y PowerShell. No hay node; sí `python3`.
+- Windows, con Git Bash y PowerShell. No hay node; sí `python3`, con `lameenc`
+  (`pip install lameenc`, para `build_baked.py`).
 - Chrome en `C:/Program Files/Google/Chrome/Application/chrome.exe`.
 - `art/` es la fuente editable de los glifos (Kenney Input Prompts, CC0), ya
   pegados en `index.html`: no se carga en ejecución y se excluye de cualquier
   zip de distribución, no del repo. `fonts/` (Baloo 2, OFL) e `img/` sí van en el
   zip: el juego los carga.
-- `audio/` va en el zip (el juego carga `audio/piano.js`, que se regenera con
-  `python3 audio/build_piano.py`, con red).
+- `audio/` va en el zip, salvo los `build_*`: el juego carga `audio/piano.js`
+  (se regenera con `python3 audio/build_piano.py`, con red) y `audio/baked.js`
+  (con `python3 audio/build_baked.py`, que lo renderiza en Chrome headless). La
+  síntesis de la música y los efectos vive en `audio/build_baked.js`: tras
+  cambiarla, o cambiar una nota de la partitura, se regenera.
 - Chrome headless se cierra por PID (`taskkill /PID <pid> /T /F`), nunca por
   nombre: cerraría también el Chrome del usuario.
 - `to-do list.md` es del usuario y está excluido en `.git/info/exclude`: no tocarlo.
